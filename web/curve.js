@@ -22,17 +22,60 @@ const PRESET_X = DEFAULT_POINTS.map(([x]) => x);
 // At halfway, the early fade reaches full weight and remains there.
 // The normalized exponential produces a smooth, steep rise without overshooting.
 const earlyFadeIn = (x) => x >= 0.5 ? 1 : (1 - Math.exp(-8 * x)) / (1 - Math.exp(-4));
+// Late schedules reduce early model-LoRA influence. The capped variant also
+// avoids returning to full adapter strength during the final refinement.
+const LATE_RISE_POINTS = [
+  [0.000, 0.050],
+  [0.125, 0.050],
+  [0.250, 0.080],
+  [0.375, 0.150],
+  [0.500, 0.300],
+  [0.625, 0.550],
+  [0.750, 0.800],
+  [0.875, 0.950],
+  [1.000, 1.000],
+];
 const PRESETS = [
   ['off', 'Off', PRESET_X.map((x) => [x, 0])],
   ['full', 'Full LoRA', PRESET_X.map((x) => [x, 1])],
   ['fade-in', 'Fade in · linear', PRESET_X.map((x) => [x, x])],
   ['early-fade-in', 'Fade in · halfway', PRESET_X.map((x) => [x, earlyFadeIn(x)])],
-  ['quick-rise', 'Quick rise', DEFAULT_POINTS],
+  // The original default curve starts at 0.5 and is almost fully on by halfway.
+  ['quick-rise', 'Rise · from 0.50', DEFAULT_POINTS],
+  // Starts at zero; reaches full strength only after 75% of denoising progress.
+  ['fast-rise', 'Rise · fast (0.00)', [
+    [0.000, 0.000],
+    [0.125, 0.372],
+    [0.250, 0.635],
+    [0.375, 0.807],
+    [0.500, 0.912],
+    [0.625, 0.975],
+    [0.750, 1.000],
+    [0.875, 1.000],
+    [1.000, 1.000],
+  ], 'smooth'],
+  // Fitted to the 0.25-start screenshot; this is stronger, not softer, than fast-rise.
+  ['soft-rise', 'Rise · head start (0.25)', [
+    [0.000, 0.250],
+    [0.125, 0.520],
+    [0.250, 0.750],
+    [0.375, 0.870],
+    [0.500, 0.950],
+    [0.625, 0.980],
+    [0.750, 1.000],
+    [0.875, 1.000],
+    [1.000, 1.000],
+  ], 'smooth'],
+  ['late-rise', 'Rise · late (full)', LATE_RISE_POINTS, 'smooth'],
+  // Same late shape with a maximum weight of 0.75, for stronger suppression.
+  ['late-rise-capped', 'Rise · late (0.75 cap)',
+    LATE_RISE_POINTS.map(([x, y]) => [x, Number((y * 0.75).toFixed(4))]), 'smooth'],
+  ['fade-out', 'Fade out · linear', PRESET_X.map((x) => [x, 1 - x])],
 ];
 const PRESET_OPTIONS = [['custom', 'Custom'], ...PRESETS.map(([id, label]) => [id, label])];
 function matchingPreset(curve) {
-  if (curve.interpolation !== 'linear') return 'custom';
-  return PRESETS.find(([, , points]) => points.length === curve.points.length
+  return PRESETS.find(([, , points, interpolation = 'linear']) => interpolation === curve.interpolation
+    && points.length === curve.points.length
     && points.every(([x, y], index) => Math.abs(curve.points[index][0] - x) < 1e-6
       && Math.abs(curve.points[index][1] - y) < 1e-6))?.[0] ?? 'custom';
 }
@@ -391,7 +434,7 @@ function createCurveEditor(node, inputName, inputData) {
     const shape = PRESETS.find(([id]) => id === preset.value);
     if (!shape) return; // 'Custom' reports an edited shape; it is not an action.
     data.points = clonePoints(shape[2]);
-    data.interpolation = 'linear';
+    data.interpolation = shape[3] ?? 'linear';
     selected = 0;
     viewMode = 'auto';
     fitBounds(); commit(); render();

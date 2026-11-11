@@ -76,6 +76,51 @@ def main() -> None:
         page.locator('.nmi-preset').select_option('early-fade-in')
         assert payload()['points'][0][1] == 0
         assert all(y == 1 for _x, y in payload()['points'][4:])
+        page.locator('.nmi-preset').select_option('fast-rise')
+        assert payload()['interpolation'] == 'smooth'
+        assert payload()['points'] == [
+            [0, 0], [0.125, 0.372], [0.25, 0.635],
+            [0.375, 0.807], [0.5, 0.912], [0.625, 0.975],
+            [0.75, 1], [0.875, 1], [1, 1],
+        ]
+        assert page.locator('.nmi-preset').input_value() == 'fast-rise'
+        page.evaluate('(value) => window.__node.widget.setValue(value)', json.dumps(payload()))
+        assert page.locator('.nmi-preset').input_value() == 'fast-rise'
+
+        page.locator('.nmi-preset').select_option('soft-rise')
+        assert payload()['interpolation'] == 'smooth'
+        assert payload()['points'] == [
+            [0, 0.25], [0.125, 0.52], [0.25, 0.75],
+            [0.375, 0.87], [0.5, 0.95], [0.625, 0.98],
+            [0.75, 1], [0.875, 1], [1, 1],
+        ]
+        assert page.locator('.nmi-preset').input_value() == 'soft-rise'
+        page.evaluate('(value) => window.__node.widget.setValue(value)', json.dumps(payload()))
+        assert page.locator('.nmi-preset').input_value() == 'soft-rise'
+        page.locator('.nmi-preset').select_option('late-rise')
+        assert payload()['interpolation'] == 'smooth'
+        assert payload()['points'] == [
+            [0, 0.05], [0.125, 0.05], [0.25, 0.08],
+            [0.375, 0.15], [0.5, 0.3], [0.625, 0.55],
+            [0.75, 0.8], [0.875, 0.95], [1, 1],
+        ]
+        assert page.locator('.nmi-preset').input_value() == 'late-rise'
+        page.evaluate('(value) => window.__node.widget.setValue(value)', json.dumps(payload()))
+        assert page.locator('.nmi-preset').input_value() == 'late-rise'
+        page.locator('.nmi-preset').select_option('late-rise-capped')
+        assert payload()['interpolation'] == 'smooth'
+        assert payload()['points'] == [
+            [0, 0.0375], [0.125, 0.0375], [0.25, 0.06],
+            [0.375, 0.1125], [0.5, 0.225], [0.625, 0.4125],
+            [0.75, 0.6], [0.875, 0.7125], [1, 0.75],
+        ]
+        page.evaluate('(value) => window.__node.widget.setValue(value)', json.dumps(payload()))
+        assert page.locator('.nmi-preset').input_value() == 'late-rise-capped'
+        page.locator('.nmi-preset').select_option('fade-out')
+        assert payload()['interpolation'] == 'linear'
+        assert all(abs(y - (1 - x)) < 1e-9 for x, y in payload()['points'])
+        page.evaluate('(value) => window.__node.widget.setValue(value)', json.dumps(payload()))
+        assert page.locator('.nmi-preset').input_value() == 'fade-out'
 
         # A saved arbitrary curve must render without losing precision or sign.
         target = {'version': 1, 'interpolation': 'smooth',
