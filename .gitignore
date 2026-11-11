@@ -1,0 +1,14 @@
+__pycache__/
+.pytest_cache/
+.coverage
+htmlcov/
+*.py[cod]
+*.egg-info/
+build/
+dist/
+.venv/
+.DS_Store
+.idea/
+.vscode/
+playwright-report/
+test-results/

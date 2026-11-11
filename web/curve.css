@@ -1,0 +1,40 @@
+/* Northmere Instruments · native-feeling, scoped DOM widget. */
+.nmi-editor{box-sizing:border-box;display:flex;flex-direction:column;gap:8px;width:100%;min-width:260px;padding:8px 10px;color:var(--input-text,#e6e6e6);font:12px/1.35 system-ui,-apple-system,sans-serif;user-select:none}
+.nmi-editor *{box-sizing:border-box}
+.nmi-heading{display:flex;align-items:center;justify-content:space-between;gap:8px;min-height:24px}
+.nmi-title{font-size:12px;font-weight:600;letter-spacing:.01em;margin-right:auto}
+.nmi-preset{max-width:118px;min-width:0;font-size:11px}
+.nmi-chart{display:flex;flex-direction:column;min-width:0;gap:0}
+.nmi-axis-top{display:flex;justify-content:space-between;font-size:10px;opacity:.7}
+.nmi-axis-top span:last-child{font-variant-numeric:tabular-nums}
+.nmi-plot{display:block;width:100%;height:auto;aspect-ratio:460/224;touch-action:none;overflow:visible;cursor:default}
+.nmi-plot-background{fill:rgba(127,127,127,.035);stroke:rgba(127,127,127,.22)}
+.nmi-grid{stroke:rgba(127,127,127,.13);stroke-width:1}
+.nmi-reference{stroke:rgba(127,127,127,.5);stroke-width:1;stroke-dasharray:4 4}
+.nmi-reference-zero{stroke:rgba(127,127,127,.75)}
+.nmi-tick{fill:currentColor;opacity:.72;font:11px ui-monospace,SFMono-Regular,monospace;pointer-events:none}
+.nmi-tick-muted{opacity:.45}
+.nmi-curve-line{fill:none;stroke:var(--p-primary-color,#6fb6ba);stroke-width:2.8;stroke-linecap:round;stroke-linejoin:round;pointer-events:none}
+.nmi-handle{fill:transparent;stroke:transparent;cursor:grab;outline:none}
+.nmi-handle:hover + .nmi-handle-visual,.nmi-handle:focus-visible + .nmi-handle-visual{stroke-width:4}
+.nmi-handle-visual{fill:var(--comfy-input-bg,#252525);stroke:var(--p-primary-color,#6fb6ba);stroke-width:2.6}
+.nmi-handle-visual-selected{fill:var(--p-primary-color,#6fb6ba);stroke:var(--comfy-input-bg,#252525);stroke-width:3}
+.nmi-axis-caption{display:flex;justify-content:space-between;align-items:center;margin-left:46px;font-size:10px;opacity:.65}
+.nmi-inspector{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:7px 10px;padding-top:7px;border-top:1px solid var(--border-color,#474747)}
+.nmi-point-title{grid-column:1 / -1;font-weight:600;font-size:11px;opacity:.85}
+.nmi-control{display:flex;flex-direction:column;gap:3px;min-width:0}
+.nmi-control-label{font-size:10px;opacity:.8}
+.nmi-select,.nmi-number,.nmi-button{height:28px;border:1px solid var(--border-color,#555);border-radius:5px;background:var(--comfy-input-bg,#252525);color:inherit;font:inherit;padding:4px 8px}
+.nmi-select,.nmi-number{width:100%;font-variant-numeric:tabular-nums}
+.nmi-button{cursor:pointer;white-space:nowrap}
+.nmi-button:hover:not(:disabled){border-color:var(--p-primary-color,#6fb6ba)}
+.nmi-button:disabled{opacity:.38;cursor:not-allowed}
+.nmi-select:focus-visible,.nmi-number:focus-visible,.nmi-button:focus-visible{outline:2px solid var(--p-primary-color,#6fb6ba);outline-offset:2px}
+.nmi-point-actions{display:flex;gap:7px;grid-column:1/-1}
+.nmi-point-actions .nmi-button:first-child{flex:1}
+.nmi-footer{padding-top:7px;border-top:1px solid var(--border-color,#474747)}
+.nmi-footer .nmi-control{flex-direction:row;align-items:center;justify-content:space-between;gap:8px}
+.nmi-footer .nmi-select{max-width:150px}
+
+.nmi-validation{font-size:11px;line-height:1.4;padding:6px 8px;border:1px solid var(--border-color,#555);border-radius:5px}
+.nmi-validation[hidden]{display:none}

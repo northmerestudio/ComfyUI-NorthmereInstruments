@@ -1,0 +1,27 @@
+[build-system]
+requires = ["setuptools>=77", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "comfyui-northmere-instruments"
+version = "0.5.0"
+description = "Northmere Instruments — precise visual controls for ComfyUI"
+readme = "README.md"
+requires-python = ">=3.10"
+license = "MIT"
+license-files = ["LICENSE", "THIRD_PARTY_NOTICES.md"]
+authors = [{ name = "Northmere Studio" }]
+keywords = ["comfyui", "lora", "envelope", "denoising", "custom-nodes"]
+classifiers = ["Programming Language :: Python :: 3", "Operating System :: OS Independent"]
+
+[project.urls]
+Repository = "https://github.com/NorthmereStudio/ComfyUI-NorthmereInstruments"
+
+[tool.setuptools]
+packages = ["northmere_instruments"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+
+[tool.ruff]
+line-length = 110
