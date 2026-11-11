@@ -16,12 +16,14 @@ const DEFAULT_STRENGTHS = [0.5, 0.8, 0.92, 0.968, 0.9872, 0.99488, 0.997952, 0.9
 const DEFAULT_POINTS = DEFAULT_STRENGTHS.map((strength, index) =>
   [index / (DEFAULT_STRENGTHS.length - 1), strength]);
 const INTERPOLATIONS = [['linear', 'Linear'], ['smooth', 'Smooth'], ['hold', 'Hold']];
-// A small set of useful starting shapes; all remain nine-point, editable envelopes.
+// Nine-point presets on an exact 1/8 progress grid; these are starting points, not guarantees.
 // The preset is UI state only: saved workflows keep the existing curve JSON schema.
 const PRESET_X = DEFAULT_POINTS.map(([x]) => x);
 // At halfway, the early fade reaches full weight and remains there.
 // The normalized exponential produces a smooth, steep rise without overshooting.
 const earlyFadeIn = (x) => x >= 0.5 ? 1 : (1 - Math.exp(-8 * x)) / (1 - Math.exp(-4));
+// Standard quadratic ease-in: slow initially, accelerating toward the finish.
+const easeIn = (x) => x * x;
 // Late schedules reduce early model-LoRA influence. The capped variant also
 // avoids returning to full adapter strength during the final refinement.
 const LATE_RISE_POINTS = [
@@ -35,15 +37,17 @@ const LATE_RISE_POINTS = [
   [0.875, 0.950],
   [1.000, 1.000],
 ];
+// Labels describe strength over denoising, not an implied visual outcome.
+// Internal IDs are stable so saved curves still match after an extension update.
 const PRESETS = [
   ['off', 'Off', PRESET_X.map((x) => [x, 0])],
-  ['full', 'Constant', PRESET_X.map((x) => [x, 1])],
+  ['full', 'Full Strength', PRESET_X.map((x) => [x, 1])],
+
+  // The four basic shapes: linear and eased timing.
   ['fade-in', 'Fade In', PRESET_X.map((x) => [x, x])],
-  ['early-fade-in', 'Quick Fade In', PRESET_X.map((x) => [x, earlyFadeIn(x)])],
   ['fade-out', 'Fade Out', PRESET_X.map((x) => [x, 1 - x])],
-  // The original default curve starts at 0.5 and is almost fully on by halfway.
-  ['quick-rise', 'Quick Start', DEFAULT_POINTS],
-  // Starts at zero; reaches full strength only after 75% of denoising progress.
+  ['ease-in', 'Ease In', PRESET_X.map((x) => [x, easeIn(x)]), 'smooth'],
+  // Original screenshot fit: ease-out character with a full-strength plateau at x=0.75.
   ['fast-rise', 'Ease Out', [
     [0.000, 0.000],
     [0.125, 0.372],
@@ -55,8 +59,17 @@ const PRESETS = [
     [0.875, 1.000],
     [1.000, 1.000],
   ], 'smooth'],
-  // Fitted to the 0.25-start screenshot; this is stronger, not softer, than fast-rise.
-  ['soft-rise', 'Soft Start', [
+
+  // Alternative fade timing: full early, gentle late, or hard on/off switching.
+  ['early-fade-in', 'Early Fade In', PRESET_X.map((x) => [x, earlyFadeIn(x)])],
+  ['late-rise', 'Late Fade In', LATE_RISE_POINTS, 'smooth'],
+  ['late-rise-capped', 'Late Fade In (75%)',
+    LATE_RISE_POINTS.map(([x, y]) => [x, Number((y * 0.75).toFixed(4))]), 'smooth'],
+  // Hold keeps the previous keyframe value until the next keyframe.
+  ['late-on', 'Late On', PRESET_X.map((x) => [x, x < 0.25 ? 0 : 1]), 'hold'],
+
+  // Nonzero start alternatives, derived from the original default and second screenshot.
+  ['soft-rise', 'Start at 25%', [
     [0.000, 0.250],
     [0.125, 0.520],
     [0.250, 0.750],
@@ -67,10 +80,7 @@ const PRESETS = [
     [0.875, 1.000],
     [1.000, 1.000],
   ], 'smooth'],
-  ['late-rise', 'Late Fade In', LATE_RISE_POINTS, 'smooth'],
-  // Same late shape with a maximum weight of 0.75, for stronger suppression.
-  ['late-rise-capped', 'Late Fade In · 75%',
-    LATE_RISE_POINTS.map(([x, y]) => [x, Number((y * 0.75).toFixed(4))]), 'smooth'],
+  ['quick-rise', 'Start at 50%', DEFAULT_POINTS],
 ];
 const PRESET_OPTIONS = [['custom', 'Custom'], ...PRESETS.map(([id, label]) => [id, label])];
 function matchingPreset(curve) {

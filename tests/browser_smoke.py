@@ -76,6 +76,24 @@ def main() -> None:
         page.locator('.nmi-preset').select_option('early-fade-in')
         assert payload()['points'][0][1] == 0
         assert all(y == 1 for _x, y in payload()['points'][4:])
+        # A standard quadratic ease-in and a 25%-progress hard switch cover
+        # timing patterns unavailable in the previous preset library.
+        labels = page.locator('.nmi-preset option').all_text_contents()
+        assert labels == [
+            'Custom', 'Off', 'Full Strength', 'Fade In', 'Fade Out',
+            'Ease In', 'Ease Out', 'Early Fade In', 'Late Fade In',
+            'Late Fade In (75%)', 'Late On', 'Start at 25%', 'Start at 50%',
+        ]
+        page.locator('.nmi-preset').select_option('ease-in')
+        assert payload()['interpolation'] == 'smooth'
+        assert payload()['points'] == [[i / 8, (i / 8) ** 2] for i in range(9)]
+        page.evaluate('(value) => window.__node.widget.setValue(value)', json.dumps(payload()))
+        assert page.locator('.nmi-preset').input_value() == 'ease-in'
+        page.locator('.nmi-preset').select_option('late-on')
+        assert payload()['interpolation'] == 'hold'
+        assert payload()['points'] == [[i / 8, 0 if i < 2 else 1] for i in range(9)]
+        page.evaluate('(value) => window.__node.widget.setValue(value)', json.dumps(payload()))
+        assert page.locator('.nmi-preset').input_value() == 'late-on'
         page.locator('.nmi-preset').select_option('fast-rise')
         assert payload()['interpolation'] == 'smooth'
         assert payload()['points'] == [
