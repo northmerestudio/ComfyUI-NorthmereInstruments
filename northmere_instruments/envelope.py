@@ -1,4 +1,4 @@
-"""Validated, step-independent LoRA strength curves.
+"""Validated, step-independent LoRA envelopes.
 
 X represents denoising progress (0 start/noise, 1 finish), NOT a sample index.
 Y is the actual signed model LoRA multiplier (no remapping).
@@ -68,26 +68,26 @@ def _slopes(xs: tuple[float, ...], ys: tuple[float, ...]) -> list[float]:
 
 
 @dataclass(frozen=True)
-class StrengthCurve:
+class LoRAEnvelope:
     xs: tuple[float, ...]
     ys: tuple[float, ...]
     interpolation: str
     slopes: tuple[float, ...]
 
     @classmethod
-    def from_json(cls, payload: str | dict) -> 'StrengthCurve':
+    def from_json(cls, payload: str | dict) -> 'LoRAEnvelope':
         try:
             data = json.loads(payload) if isinstance(payload, str) else payload
         except json.JSONDecodeError as exc:
-            raise ValueError('Invalid strength curve JSON') from exc
+            raise ValueError('Invalid LoRA envelope JSON') from exc
         if not isinstance(data, dict) or data.get('version') != 1:
-            raise ValueError('Curve must be a version 1 object')
+            raise ValueError('Envelope must be a version 1 object')
         interp = data.get('interpolation', 'linear')
         if interp not in ('linear', 'smooth', 'hold'):
             raise ValueError('Interpolation must be linear, smooth or hold')
         raw = data.get('points')
         if not isinstance(raw, list) or not 2 <= len(raw) <= MAX_POINTS:
-            raise ValueError(f'Curve needs 2–{MAX_POINTS} points')
+            raise ValueError(f'Envelope needs 2–{MAX_POINTS} points')
         pairs = []
         for p in raw:
             if not isinstance(p, (list, tuple)) or len(p) != 2 or any(type(v) not in (int, float) for v in p):
@@ -97,7 +97,7 @@ class StrengthCurve:
                 raise ValueError('X must be 0..1 and strength must be finite, within ±20')
             pairs.append((x, y))
         if pairs[0][0] != 0.0 or pairs[-1][0] != 1.0:
-            raise ValueError('Curve requires fixed endpoints at X=0 and X=1')
+            raise ValueError('Envelope requires fixed endpoints at X=0 and X=1')
         if any(a[0] >= b[0] for a, b in zip(pairs, pairs[1:])):
             raise ValueError('X positions must be strictly increasing')
         xs, ys = zip(*pairs)

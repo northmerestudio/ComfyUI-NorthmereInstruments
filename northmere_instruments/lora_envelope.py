@@ -7,7 +7,7 @@ import comfy.utils
 import folder_paths
 from comfy_api.latest import io
 from .engine import Profile, resolve_layers, install_wrapper, parse_layers
-from .curve import DEFAULT_CURVE, StrengthCurve
+from .envelope import DEFAULT_CURVE, LoRAEnvelope
 
 LOGGER = logging.getLogger(__name__)
 CATEGORY = 'Northmere Instruments/LoRA'
@@ -26,7 +26,7 @@ class EnvelopeInput(io.String.Input):
         self.socketless = True
 
 
-def _apply(model: Any, lora_name: str, curve: StrengthCurve, apply_to: str) -> Any:
+def _apply(model: Any, lora_name: str, curve: LoRAEnvelope, apply_to: str) -> Any:
     path = folder_paths.get_full_path('loras', lora_name)
     if not path:
         raise FileNotFoundError(f'Cannot find LoRA: {lora_name}')
@@ -56,7 +56,7 @@ class LoRAEnvelopeNode(io.ComfyNode):
     @classmethod
     def define_schema(cls) -> io.Schema:
         return io.Schema(
-            node_id='NorthmereInstruments.LoRAStrengthCurve', display_name='LoRA Envelope', category=CATEGORY,
+            node_id='NorthmereInstruments.LoRAEnvelope', display_name='LoRA Envelope', category=CATEGORY,
             description='Modulate model-only LoRA weight over normalized denoising progress. '
                         'Independent of sampler step count; supports linear, smooth, and hold interpolation. '
                         'Works with a standard KSampler (no special sampler required).',
@@ -77,5 +77,5 @@ class LoRAEnvelopeNode(io.ComfyNode):
     def execute(
         cls, model: Any, lora_name: str, curve: str, apply_to: str = 'both'
     ) -> io.NodeOutput:
-        parsed = StrengthCurve.from_json(curve)
+        parsed = LoRAEnvelope.from_json(curve)
         return io.NodeOutput(_apply(model, lora_name, parsed, apply_to))

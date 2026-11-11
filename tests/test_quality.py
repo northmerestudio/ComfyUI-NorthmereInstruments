@@ -4,7 +4,7 @@ from __future__ import annotations
 import pytest
 import torch
 
-from northmere_instruments.curve import DEFAULT_CURVE, StrengthCurve
+from northmere_instruments.envelope import DEFAULT_CURVE, LoRAEnvelope
 from northmere_instruments.engine import Layer, Profile, resolve_layers, install_wrapper, parse_layers
 
 
@@ -43,7 +43,7 @@ class Patcher:
 
 
 def test_negative_and_amplified_curves():
-    curve = StrengthCurve.from_json({"version": 1, "interpolation": "linear", "points": [[0, -1.5], [1, 2.5]]})
+    curve = LoRAEnvelope.from_json({"version": 1, "interpolation": "linear", "points": [[0, -1.5], [1, 2.5]]})
     assert curve.at(0) == -1.5
     assert curve.at(0.5) == 0.5
     assert curve.at(1) == 2.5
@@ -57,7 +57,7 @@ def test_negative_and_amplified_curves():
 ])
 def test_invalid_curve_rejected(payload):
     with pytest.raises(ValueError):
-        StrengthCurve.from_json(payload)
+        LoRAEnvelope.from_json(payload)
 
 
 def test_unmatched_layer_not_silently_accepted():
@@ -77,7 +77,7 @@ def test_duplicate_weight_mapping_rejected():
 def test_profile_is_inactive_outside_wrapper():
     patcher = Patcher()
     layer = Layer(torch.ones(2, 2), torch.ones(2, 3), 1.0)
-    profile = Profile({"diffusion_model.first.weight": layer}, StrengthCurve.from_json(DEFAULT_CURVE),
+    profile = Profile({"diffusion_model.first.weight": layer}, LoRAEnvelope.from_json(DEFAULT_CURVE),
                       "both", patcher.model.model_sampling)
     bound, skipped = resolve_layers(patcher.model.diffusion_model, profile.layers)
     assert len(bound) == 1 and skipped == 0
@@ -94,7 +94,7 @@ def test_profile_is_inactive_outside_wrapper():
 def test_unrelated_model_wrapper_is_not_overwritten():
     patcher = Patcher()
     patcher.model_options["model_function_wrapper"] = object()
-    profile = Profile({}, StrengthCurve.from_json(DEFAULT_CURVE), "both", patcher.model.model_sampling,
+    profile = Profile({}, LoRAEnvelope.from_json(DEFAULT_CURVE), "both", patcher.model.model_sampling,
                       (object(),))
     with pytest.raises(RuntimeError, match="Existing model_function_wrapper"):
         install_wrapper(patcher, profile)

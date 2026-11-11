@@ -12,9 +12,9 @@ PACK_NAME = 'ComfyUI-NorthmereInstruments'
 REQUIRED = (
     '__init__.py',
     'northmere_instruments/__init__.py',
-    'northmere_instruments/nodes.py',
+    'northmere_instruments/lora_envelope.py',
     'northmere_instruments/engine.py',
-    'northmere_instruments/curve.py',
+    'northmere_instruments/envelope.py',
     'web/curve.js',
     'web/curve.css',
 )

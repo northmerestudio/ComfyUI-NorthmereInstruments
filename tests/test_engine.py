@@ -4,7 +4,7 @@ from __future__ import annotations
 import pytest
 import torch
 
-from northmere_instruments.curve import DEFAULT_CURVE, StrengthCurve
+from northmere_instruments.envelope import DEFAULT_CURVE, LoRAEnvelope
 from northmere_instruments.engine import Layer, Profile, _mask, install_wrapper, parse_layers, resolve_layers
 
 
@@ -51,7 +51,7 @@ def make_profile(patcher: Patcher) -> Profile:
     bound, skipped = resolve_layers(patcher.model.diffusion_model, layers)
     assert skipped == 0
     assert len(bound) == 1
-    return Profile(layers, StrengthCurve.from_json(DEFAULT_CURVE), 'both',
+    return Profile(layers, LoRAEnvelope.from_json(DEFAULT_CURVE), 'both',
                    patcher.model.model_sampling, bound)
 
 

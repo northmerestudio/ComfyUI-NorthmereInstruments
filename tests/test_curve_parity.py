@@ -8,7 +8,7 @@ from pathlib import Path
 
 import pytest
 
-from northmere_instruments.curve import StrengthCurve
+from northmere_instruments.envelope import LoRAEnvelope
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -25,7 +25,7 @@ def test_backend_and_frontend_match_for_diverse_curves():
                 points = [[x, rng.uniform(-3, 3)] for x in positions]
                 samples = [0, 1, *[rng.random() for _ in range(80)]]
                 payload = {'version': 1, 'interpolation': interpolation, 'points': points}
-                curve = StrengthCurve.from_json(payload)
+                curve = LoRAEnvelope.from_json(payload)
                 batches.append({'interpolation': interpolation, 'points': points, 'positions': samples})
                 expected.append([curve.at(x) for x in samples])
     run = subprocess.run(

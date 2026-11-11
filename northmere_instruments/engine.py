@@ -18,7 +18,7 @@ from typing import Any, Callable, Protocol
 import torch
 import torch.nn.functional as F
 
-from .curve import StrengthCurve, sigma_to_progress
+from .envelope import LoRAEnvelope, sigma_to_progress
 
 
 class SamplingSchedule(Protocol):
@@ -48,7 +48,7 @@ class BoundLayer:
 @dataclass(frozen=True, eq=False)
 class Profile:
     layers: dict[str, Layer]
-    schedule: StrengthCurve
+    schedule: LoRAEnvelope
     apply_to: str
     sampling: SamplingSchedule
     bound_layers: tuple[BoundLayer, ...] = ()

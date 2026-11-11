@@ -4,7 +4,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from northmere_instruments.curve import DEFAULT_CURVE
+from northmere_instruments.envelope import DEFAULT_CURVE
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -19,8 +19,8 @@ def test_envelope_starts_with_nine_keyframes() -> None:
 
 
 def test_node_id_is_stable_but_display_name_is_clear() -> None:
-    source = (ROOT / "northmere_instruments" / "nodes.py").read_text()
-    assert "node_id='NorthmereInstruments.LoRAStrengthCurve'" in source
+    source = (ROOT / "northmere_instruments" / "lora_envelope.py").read_text()
+    assert "node_id='NorthmereInstruments.LoRAEnvelope'" in source
     assert "display_name='LoRA Envelope'" in source
     assert "class LoRAEnvelopeNode(io.ComfyNode):" in source
 
@@ -33,7 +33,7 @@ def test_frontend_preserves_widget_serialization_type() -> None:
 
 
 def test_enabled_switch_removed_from_node_interface() -> None:
-    source = (ROOT / "northmere_instruments" / "nodes.py").read_text()
+    source = (ROOT / "northmere_instruments" / "lora_envelope.py").read_text()
     assert "io.Boolean.Input('enabled'" not in source
     assert "def execute(" in source
     assert "apply_to: str = 'both'" in source

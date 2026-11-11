@@ -11,7 +11,7 @@ import subprocess
 
 import pytest
 
-from northmere_instruments.curve import StrengthCurve
+from northmere_instruments.envelope import LoRAEnvelope
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -49,7 +49,7 @@ def test_exact_eighth_grid_and_valid_backend_curves(presets):
         assert len(points) == 9, key
         assert [p[0] for p in points] == [i / 8 for i in range(9)], key
         assert all(0 <= p[1] <= 1 for p in points), key
-        curve = StrengthCurve.from_json({'version': 1, 'points': points,
+        curve = LoRAEnvelope.from_json({'version': 1, 'points': points,
                                          'interpolation': interpolation})
         for i in range(1001):
             weight = curve.at(i / 1000)
@@ -59,7 +59,7 @@ def test_exact_eighth_grid_and_valid_backend_curves(presets):
 def test_semantic_shapes_and_endpoints(presets):
     def curve(id_):
         _, points, interp = presets[id_]
-        return StrengthCurve.from_json({'version': 1, 'points': points, 'interpolation': interp})
+        return LoRAEnvelope.from_json({'version': 1, 'points': points, 'interpolation': interp})
 
     assert all(p[1] == 0 for p in presets['off'][1])
     assert all(p[1] == 1 for p in presets['full'][1])
@@ -82,7 +82,7 @@ def test_semantic_shapes_and_endpoints(presets):
 def test_all_shape_profiles_are_distinct(presets):
     traces = []
     for id_, (_, points, interpolation) in presets.items():
-        curve = StrengthCurve.from_json({'version': 1, 'points': points,
+        curve = LoRAEnvelope.from_json({'version': 1, 'points': points,
                                          'interpolation': interpolation})
         trace = tuple(round(curve.at(i/100), 8) for i in range(101))
         assert trace not in traces, f'duplicate curve: {id_}'

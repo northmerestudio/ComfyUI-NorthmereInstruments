@@ -118,14 +118,14 @@ class _Patcher:
 def test_v3_schema_and_native_widget_contract(plugin) -> None:
     node, _lora, _utils = plugin
     schema = node.define_schema()
-    assert schema.node_id == 'NorthmereInstruments.LoRAStrengthCurve'
+    assert schema.node_id == 'NorthmereInstruments.LoRAEnvelope'
     assert schema.display_name == 'LoRA Envelope'
     assert [item.id for item in schema.inputs] == ['model', 'lora_name', 'curve', 'apply_to']
     curve = schema.inputs[2]
     assert curve.widget_type == 'NORTHMERE_INSTRUMENTS_CURVE'
     assert curve.socketless is True
-    from northmere_instruments.curve import StrengthCurve
-    assert len(StrengthCurve.from_json(curve.default).xs) == 9
+    from northmere_instruments.envelope import LoRAEnvelope
+    assert len(LoRAEnvelope.from_json(curve.default).xs) == 9
     assert [out.display_name for out in schema.outputs] == ['MODEL']
 
 
@@ -137,7 +137,7 @@ def test_execute_applies_complete_supported_adapter(plugin) -> None:
         'linear.lora_up.weight': torch.ones(2, 2),
         'linear.lora_down.weight': torch.ones(2, 3),
     }
-    from northmere_instruments.curve import DEFAULT_CURVE
+    from northmere_instruments.envelope import DEFAULT_CURVE
     out = node.execute(model, 'supported.safetensors', DEFAULT_CURVE, 'both').model
     x = torch.ones(1, 3)
     actual = out.wrapper(
@@ -158,6 +158,6 @@ def test_execute_rejects_partially_mapped_adapter(plugin) -> None:
         'unknown.lora_up.weight': torch.ones(2, 2),
         'unknown.lora_down.weight': torch.ones(2, 3),
     }
-    from northmere_instruments.curve import DEFAULT_CURVE
+    from northmere_instruments.envelope import DEFAULT_CURVE
     with pytest.raises(ValueError, match='partially compatible'):
         node.execute(model, 'partial.safetensors', DEFAULT_CURVE, 'both')

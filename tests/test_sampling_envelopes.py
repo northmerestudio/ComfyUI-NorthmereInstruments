@@ -4,7 +4,7 @@ from __future__ import annotations
 import pytest
 import torch
 
-from northmere_instruments.curve import StrengthCurve
+from northmere_instruments.envelope import LoRAEnvelope
 from northmere_instruments.engine import Layer, Profile, install_wrapper, parse_layers, resolve_layers
 
 
@@ -45,7 +45,7 @@ class _Patcher:
 @pytest.mark.parametrize('sampler_steps', [8, 20, 40])
 def test_envelope_matches_actual_progress_at_each_model_forward(points, sampler_steps):
     base = _Patcher()
-    curve = StrengthCurve.from_json({'version': 1, 'interpolation': 'linear', 'points': points})
+    curve = LoRAEnvelope.from_json({'version': 1, 'interpolation': 'linear', 'points': points})
     weights = {'diffusion_model.first.weight': Layer(torch.ones(2, 2), torch.ones(2, 3), 1.)}
     bound, skipped = resolve_layers(base.model.diffusion_model, weights)
     assert skipped == 0

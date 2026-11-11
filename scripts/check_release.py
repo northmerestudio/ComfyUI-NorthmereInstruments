@@ -23,9 +23,9 @@ REQUIRED = {
     'LICENSE',
     'pyproject.toml',
     '.github/workflows/test.yml',
-    'northmere_instruments/nodes.py',
+    'northmere_instruments/lora_envelope.py',
     'northmere_instruments/engine.py',
-    'northmere_instruments/curve.py',
+    'northmere_instruments/envelope.py',
     'web/curve.js',
     'web/curve.css',
 }
