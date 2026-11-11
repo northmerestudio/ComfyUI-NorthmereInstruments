@@ -1,5 +1,5 @@
 /* Northmere Instruments · native-feeling, scoped DOM widget. */
-.nmi-editor{box-sizing:border-box;display:flex;flex-direction:column;gap:8px;width:100%;min-width:260px;padding:8px 10px;color:var(--input-text,#e6e6e6);font:12px/1.35 system-ui,-apple-system,sans-serif;user-select:none}
+.nmi-editor{box-sizing:border-box;display:flex;flex-direction:column;gap:8px;width:100%;min-width:0;padding:8px 10px;color:var(--input-text,#e6e6e6);font:12px/1.35 system-ui,-apple-system,sans-serif;user-select:none}
 .nmi-editor *{box-sizing:border-box}
 .nmi-heading{display:flex;align-items:center;justify-content:space-between;gap:8px;min-height:24px}
 .nmi-title{font-size:12px;font-weight:600;letter-spacing:.01em;margin-right:auto}
@@ -7,7 +7,7 @@
 .nmi-chart{display:flex;flex-direction:column;min-width:0;gap:0}
 .nmi-axis-top{display:flex;justify-content:space-between;font-size:10px;opacity:.7}
 .nmi-axis-top span:last-child{font-variant-numeric:tabular-nums}
-.nmi-plot{display:block;width:100%;height:auto;aspect-ratio:460/224;touch-action:none;overflow:visible;cursor:default}
+.nmi-plot{display:block;width:100%;height:auto;aspect-ratio:460/224;touch-action:none;overflow:hidden;cursor:default}
 .nmi-plot-background{fill:rgba(127,127,127,.035);stroke:rgba(127,127,127,.22)}
 .nmi-grid{stroke:rgba(127,127,127,.13);stroke-width:1}
 .nmi-reference{stroke:rgba(127,127,127,.5);stroke-width:1;stroke-dasharray:4 4}
