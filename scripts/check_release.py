@@ -22,7 +22,6 @@ REQUIRED = {
     'README.md',
     'LICENSE',
     'pyproject.toml',
-    'THIRD_PARTY_NOTICES.md',
     '.github/workflows/test.yml',
     'northmere_instruments/nodes.py',
     'northmere_instruments/engine.py',

@@ -9,7 +9,7 @@ description = "Northmere Instruments — precise visual controls for ComfyUI"
 readme = "README.md"
 requires-python = ">=3.10"
 license = "MIT"
-license-files = ["LICENSE", "THIRD_PARTY_NOTICES.md"]
+license-files = ["LICENSE"]
 authors = [{ name = "Northmere Studio" }]
 keywords = ["comfyui", "lora", "envelope", "denoising", "custom-nodes"]
 classifiers = ["Programming Language :: Python :: 3", "Operating System :: OS Independent"]
