@@ -13,15 +13,15 @@ class DynamicPromptNode(io.ComfyNode):
     def define_schema(cls) -> io.Schema:
         return io.Schema(
             node_id='NorthmereInstruments.DynamicPrompt',
-            display_name='Dynamic Prompt (Rules)',
+            display_name='Northmere Prompt v3',
             category=CATEGORY,
-            description='Seeded choices, reusable [[DEF]] sections, conditional [[WHEN]] text, and hard/soft rules.',
+            description='Seeded ComfyUI choices, labelled @pick alternatives, @if, @define, and exact rule-aware sampling.',
             search_aliases=['northmere', 'dynamic prompt', 'seeded prompt', 'prompt rules'],
             inputs=[
                 io.String.Input(
                     'template', multiline=True, default='',
-                    tooltip='Nested {one|two} choices, [[#tag]], [[DEF name]]/[[USE name]], '
-                    '[[WHEN tag]], and a final [[RULES]] block (-> or ~>).',
+                    tooltip='Use {one|two}, {3::one|two}, @pick{day: sunny|night: moonlit}, '
+                    '@if(day){warm light}, @define/@use and @rules/@end.',
                 ),
                 io.Int.Input('seed', default=0, min=0, max=0xFFFFFFFFFFFFFFFF,
                              control_after_generate=True,

@@ -1,451 +1,371 @@
-"""Northmere dynamic prompts: whitespace-tolerant, constraint-aware expansion.
+"""Northmere Prompt v3. Deliberately incompatible with the old [[...]] DSL.
 
-Structural whitespace inside [[...]] directives and around choice alternatives is
-ignored. Whitespace in ordinary literal text (including WHEN bodies) is preserved.
+Grammar overview:
+    {red|blue}                   unlabelled choice
+    {3::red|1::blue}             positive relative alternative weights
+    @pick{day: sunny|night: moonlit}  labelled alternatives (facts)
+    @if(day){bright light}       conditional rendering (no new facts)
+    @use(name)                   fresh macro expansion
+    @define name / @end         line-oriented reusable text
+    @rules / @end               line-oriented constraints and preferences
+
+Rule forms: `day -> night`, `day -> !night`, `day ~> sun @ 3`.
+The solver samples valid *complete selections* with product weights, so hard
+constraints and conditional preference factors are never bypassed.
 """
 from __future__ import annotations
 
 import math
 import random
 import re
-from collections import deque
 from dataclasses import dataclass
-from functools import lru_cache
 
-MAX_CHOICES = 4096
 MAX_DEPTH = 64
-MAX_SEARCH_STATES = 200_000
+MAX_NODES = 8192
 MAX_DEFINITIONS = 256
 MAX_REFERENCE_DEPTH = 32
 MAX_EXPANDED_CHARS = 1_000_000
-IDENT = r'[A-Za-z][A-Za-z0-9_]*'
-DEF_IDENT = r'[A-Za-z][A-Za-z0-9_.]*'
-TAG_RE = re.compile(r'\[\[\s*#\s*(' + IDENT + r')\s*\]\]')
-WHEN_RE = re.compile(r'\[\[\s*WHEN\s+(' + IDENT + r')\s*\]\]')
-WHEN_END_RE = re.compile(r'\[\[\s*/\s*WHEN\s*\]\]')
-USE_RE = re.compile(r'(?<!\\)\[\[\s*USE\s+(' + DEF_IDENT + r')\s*\]\]')
-DEF_START_RE = re.compile(r'\[\[\s*DEF\s+(' + DEF_IDENT + r')\s*\]\]')
-DEF_END_RE = re.compile(r'\[\[\s*/\s*DEF\s*\]\]')
-RULES_START_RE = re.compile(r'\[\[\s*RULES\s*\]\]')
-RULES_END_RE = re.compile(r'\[\[\s*/\s*RULES\s*\]\]')
-RULE_RE = re.compile(r'(' + IDENT + r')\s*->\s*(!?)\s*(' + IDENT + r')')
-SOFT_RULE_RE = re.compile(r'(' + IDENT + r')\s*~>\s*(' + IDENT + r')\s*@\s*' +
-                          r'((?:[0-9]+(?:\.[0-9]*)?|\.[0-9]+)(?:[eE][+-]?[0-9]+)?)')
-ESCAPABLE = frozenset(r'{}|\[]')
-
+MAX_VALID_STATES = 200_000
+NAME = r'[A-Za-z][A-Za-z0-9_.-]*'
+NAME_RE = re.compile(NAME + r'\Z')
+BLOCK_START = re.compile(r'^\s*@(define|rules)\b(.*)$')
+END_BLOCK = re.compile(r'^\s*@end\s*$')
+USE = re.compile(r'@use\s*\(\s*(' + NAME + r')\s*\)')
+HARD = re.compile(r'(' + NAME + r')\s*->\s*(!?)\s*(' + NAME + r')\Z')
+SOFT = re.compile(r'(' + NAME + r')\s*~>\s*(' + NAME + r')\s*@\s*([0-9]+(?:\.[0-9]*)?|\.[0-9]+)(?:\s*)\Z')
+WEIGHT = re.compile(r'\s*([0-9]+(?:\.[0-9]*)?|\.[0-9]+)\s*::')
+LABEL = re.compile(r'\s*(' + NAME + r')\s*:')
+ESCAPE = frozenset('\\{}|@:')
 
 class PromptSyntaxError(ValueError):
-    """Invalid markup, unknown references, unsatisfiable constraints or safety limit."""
-
+    """Syntax, semantic or bounded-execution error in a Northmere prompt."""
 
 @dataclass(frozen=True)
-class Literal:
+class Text:
     value: str
-
-
-@dataclass(frozen=True)
-class Tag:
-    name: str
-
-
-@dataclass(frozen=True)
-class When:
-    tag: str
-    text: str
-
 
 @dataclass(frozen=True)
 class Choice:
-    alternatives: tuple[tuple[object, ...], ...]
+    options: tuple['Option', ...]
 
+@dataclass(frozen=True)
+class Option:
+    nodes: tuple[object, ...]
+    weight: float = 1.0
+    fact: str | None = None
+
+@dataclass(frozen=True)
+class If:
+    fact: str
+    nodes: tuple[object, ...]
 
 @dataclass(frozen=True)
 class Rule:
-    trigger: str
+    source: str
     target: str
-    required: bool
-
+    positive: bool
 
 @dataclass(frozen=True)
-class SoftRule:
-    trigger: str
+class Preference:
+    source: str
     target: str
-    weight: float
+    factor: float
 
 
-def _directive(line: str, pattern: re.Pattern[str]) -> re.Match[str] | None:
-    return pattern.fullmatch(line.strip())
-
-
-def split_inline_rules(template: str) -> tuple[str, str]:
-    """Accept indented RULES markers with optional internal whitespace and CRLF."""
-    lines = template.splitlines(keepends=True)
-    starts = [i for i, line in enumerate(lines) if _directive(line, RULES_START_RE)]
-    ends = [i for i, line in enumerate(lines) if _directive(line, RULES_END_RE)]
-    if not starts and not ends:
-        # Catch malformed standalone directives instead of rendering them.
-        if re.search(r'(?m)^\s*\[\[\s*/?\s*RULES\b', template):
-            raise PromptSyntaxError('Malformed or unpaired [[RULES]] block')
-        return template, ''
-    if len(starts) != 1 or len(ends) != 1 or starts[0] >= ends[0]:
-        raise PromptSyntaxError('Expected one [[RULES]] / [[/RULES]] pair')
-    a, b = starts[0], ends[0]
-    if any(line.strip() for line in lines[b + 1:]):
-        raise PromptSyntaxError('Rules block must be the final nonblank section')
-    return ''.join(lines[:a]).rstrip('\r\n'), ''.join(lines[a + 1:b])
-
-
-def expand_definitions(template: str) -> str:
-    """Expand standalone definitions; referenced copies are parsed independently."""
+def _extract(template: str) -> tuple[str, dict[str, str], str]:
+    """Remove line-oriented blocks with strict nesting and end checks."""
     definitions: dict[str, str] = {}
+    rule_lines: list[str] = []
+    output: list[str] = []
     lines = template.splitlines(keepends=True)
-    out: list[str] = []
     i = 0
     while i < len(lines):
-        match = _directive(lines[i], DEF_START_RE)
-        if match:
-            name = match.group(1)
-            if name in definitions:
-                raise PromptSyntaxError(f'Duplicate definition {name!r}')
-            i += 1
-            body: list[str] = []
-            while i < len(lines) and not _directive(lines[i], DEF_END_RE):
-                if _directive(lines[i], DEF_START_RE):
-                    raise PromptSyntaxError('Nested definitions are not supported')
-                body.append(lines[i])
-                i += 1
-            if i == len(lines):
-                raise PromptSyntaxError(f'Unclosed [[DEF {name}]] block')
-            definitions[name] = ''.join(body).rstrip('\r\n')
-            if len(definitions) > MAX_DEFINITIONS:
-                raise PromptSyntaxError('Too many definitions')
-            i += 1
+        match = BLOCK_START.fullmatch(lines[i].rstrip('\r\n'))
+        if not match:
+            if END_BLOCK.fullmatch(lines[i].rstrip('\r\n')):
+                raise PromptSyntaxError(f'Unexpected @end on line {i+1}')
+            output.append(lines[i]); i += 1; continue
+        kind, arg = match.groups()
+        name = arg.strip()
+        if kind == 'define' and not NAME_RE.fullmatch(name):
+            raise PromptSyntaxError(f'Invalid definition name on line {i+1}')
+        if kind == 'rules' and name:
+            raise PromptSyntaxError(f'@rules takes no arguments (line {i+1})')
+        if kind == 'rules' and rule_lines:
+            raise PromptSyntaxError('Only one @rules block is supported')
+        i += 1
+        body: list[str] = []
+        while i < len(lines) and not END_BLOCK.fullmatch(lines[i].rstrip('\r\n')):
+            if BLOCK_START.fullmatch(lines[i].rstrip('\r\n')):
+                raise PromptSyntaxError('Nested @define/@rules blocks are not allowed')
+            body.append(lines[i]); i += 1
+        if i == len(lines):
+            raise PromptSyntaxError(f'Unclosed @{kind} block')
+        i += 1
+        if kind == 'define':
+            if name in definitions: raise PromptSyntaxError(f'Duplicate definition: {name}')
+            definitions[name] = ''.join(body).strip('\r\n')
+            if len(definitions) > MAX_DEFINITIONS: raise PromptSyntaxError('Too many definitions')
         else:
-            # Detect malformed standalone definition constructs early.
-            if re.match(r'^\s*\[\[\s*/?\s*DEF\b', lines[i]):
-                raise PromptSyntaxError(f'Malformed or misplaced definition on line {i + 1}')
-            out.append(lines[i])
-            i += 1
-    prompt = ''.join(out)
-    if definitions:
-        prompt = prompt.strip('\r\n')
+            if rule_lines: raise PromptSyntaxError('Only one @rules block is supported')
+            rule_lines = body or ['\n']
+    return ''.join(output).strip('\r\n'), definitions, ''.join(rule_lines)
 
-    def resolve(value: str, stack: tuple[str, ...]) -> str:
-        def replace(match: re.Match[str]) -> str:
-            name = match.group(1)
-            if name not in definitions:
-                raise PromptSyntaxError(f'Unknown definition {name!r}')
-            if name in stack:
-                raise PromptSyntaxError('Recursive definition: ' + ' -> '.join((*stack, name)))
-            if len(stack) >= MAX_REFERENCE_DEPTH:
-                raise PromptSyntaxError('Definition reference depth exceeded')
-            return resolve(definitions[name], (*stack, name))
-        result = USE_RE.sub(replace, value)
-        if re.search(r'(?<!\\)\[\[\s*USE\b', result):
-            raise PromptSyntaxError('Malformed [[USE name]] reference')
-        if len(result) > MAX_EXPANDED_CHARS:
-            raise PromptSyntaxError('Expanded definitions exceed character limit')
-        return result
-    return resolve(prompt, ())
+
+def _resolve(text: str, definitions: dict[str, str], stack: tuple[str, ...] = ()) -> str:
+    # A scanner ensures escaped @use() remains literal; no regex replacement on escaped text.
+    out: list[str] = []
+    i = 0; size = 0
+    while i < len(text):
+        if text[i] == '\\' and i + 1 < len(text) and text[i+1] == '@':
+            piece = text[i:i+2]; i += 2
+        elif text.startswith('@use', i):
+            m = USE.match(text, i)
+            if not m: raise PromptSyntaxError(f'Malformed @use at offset {i}')
+            name = m.group(1)
+            if name not in definitions: raise PromptSyntaxError(f'Unknown definition: {name}')
+            if name in stack: raise PromptSyntaxError('Recursive definition: ' + ' -> '.join((*stack, name)))
+            if len(stack) >= MAX_REFERENCE_DEPTH: raise PromptSyntaxError('Definition reference depth exceeded')
+            piece = _resolve(definitions[name], definitions, (*stack, name))
+            i = m.end()
+        else:
+            piece = text[i]; i += 1
+        out.append(piece); size += len(piece)
+        if size > MAX_EXPANDED_CHARS: raise PromptSyntaxError('Expanded prompt exceeds size limit')
+    return ''.join(out)
 
 
 class Parser:
-    def __init__(self, template: str) -> None:
-        self.text = template
-        self.pos = 0
-        self.count = 0
+    def __init__(self, text: str):
+        self.text = text
+        self.index = 0
+        self.node_count = 0
 
     def parse(self) -> tuple[object, ...]:
-        tree, stop = self._sequence(0, root=True)
-        if stop is not None:
-            raise PromptSyntaxError('Unexpected parser delimiter')
-        return tree
+        nodes, closing = self.sequence(0, None)
+        if closing is not None: raise PromptSyntaxError('Unexpected delimiter')
+        return nodes
 
-    def _sequence(self, depth: int, *, root: bool = False) -> tuple[tuple[object, ...], str | None]:
-        if depth > MAX_DEPTH:
-            raise PromptSyntaxError(f'Brace nesting exceeds {MAX_DEPTH} levels')
+    def sequence(self, depth: int, context: str | None) -> tuple[tuple[object, ...], str | None]:
+        if depth > MAX_DEPTH: raise PromptSyntaxError('Maximum nesting depth exceeded')
         nodes: list[object] = []
         buf: list[str] = []
-
-        def flush() -> None:
+        def flush():
             if buf:
-                nodes.append(Literal(''.join(buf)))
-                buf.clear()
-
-        while self.pos < len(self.text):
-            start = self.pos
-            ch = self.text[start]
-            if ch == '\\' and start + 1 < len(self.text) and self.text[start + 1] in ESCAPABLE:
-                buf.append(self.text[start + 1])
-                self.pos += 2
-                continue
-            if self.text.startswith('[[', start):
-                tag = TAG_RE.match(self.text, start)
-                opening = WHEN_RE.match(self.text, start)
-                if tag:
-                    flush()
-                    nodes.append(Tag(tag.group(1)))
-                    self.pos = tag.end()
-                    continue
-                if opening:
-                    closing = WHEN_END_RE.search(self.text, opening.end())
-                    if closing is None:
-                        raise PromptSyntaxError(f'Unclosed [[WHEN]] at offset {start}')
-                    content = self.text[opening.end():closing.start()]
-                    # Contents are literal, never conditional syntax of their own.
-                    if '[[' in content or '{' in content or '}' in content:
-                        raise PromptSyntaxError('[[WHEN]] must contain plain text only')
-                    flush()
-                    nodes.append(When(opening.group(1), content))
-                    self.pos = closing.end()
-                    continue
-                if re.match(r'\[\[\s*(?:#|/?\s*WHEN\b|USE\b|DEF\b|/?\s*RULES\b)', self.text[start:]):
-                    raise PromptSyntaxError(f'Malformed or misplaced directive at offset {start}')
-            if ch == '{':
-                flush()
-                self.pos += 1
-                options: list[tuple[object, ...]] = []
-                while True:
-                    option, stop = self._sequence(depth + 1)
-                    options.append(_trim_alternative(option))
-                    if stop == '}':
-                        break
-                    if stop is None:
-                        raise PromptSyntaxError(f"Unclosed '{{' at offset {start}")
-                if len(options) < 2:
-                    raise PromptSyntaxError(f'Choice at offset {start} needs a | separator')
-                self.count += 1
-                if self.count > MAX_CHOICES:
-                    raise PromptSyntaxError('Too many choices')
-                nodes.append(Choice(tuple(options)))
-                continue
-            if ch == '}':
-                if root:
-                    raise PromptSyntaxError(f"Unexpected '}}' at offset {start}")
-                flush()
-                self.pos += 1
-                return tuple(nodes), '}'
-            if ch == '|' and not root:
-                flush()
-                self.pos += 1
-                return tuple(nodes), '|'
-            buf.append(ch)
-            self.pos += 1
+                nodes.append(Text(''.join(buf))); buf.clear()
+        while self.index < len(self.text):
+            c = self.text[self.index]
+            if c == '\\' and self.index + 1 < len(self.text) and self.text[self.index+1] in ESCAPE:
+                buf.append(self.text[self.index+1]); self.index += 2; continue
+            if c == '@':
+                if self.text.startswith('@pick', self.index):
+                    m = re.match(r'@pick\s*\{', self.text[self.index:])
+                    if not m: raise PromptSyntaxError(f'Malformed @pick at offset {self.index}')
+                    flush(); self.index += m.end()
+                    nodes.append(self.choice(depth+1, labelled=True)); continue
+                if self.text.startswith('@if', self.index):
+                    m = re.match(r'@if\s*\(\s*(' + NAME + r')\s*\)\s*\{', self.text[self.index:])
+                    if not m: raise PromptSyntaxError(f'Malformed @if at offset {self.index}')
+                    flush(); self.index += m.end()
+                    body, stop = self.sequence(depth+1, 'if')
+                    if stop != '}': raise PromptSyntaxError('Unclosed @if body')
+                    nodes.append(If(m.group(1), body)); continue
+                if re.match(r'@(define|rules|end|use)\b', self.text[self.index:]):
+                    raise PromptSyntaxError(f'Misplaced directive at offset {self.index}')
+            if c == '{':
+                flush(); self.index += 1; nodes.append(self.choice(depth+1, labelled=False)); continue
+            if c == '}':
+                if context is None: raise PromptSyntaxError(f'Unexpected }} at offset {self.index}')
+                flush(); self.index += 1; return tuple(nodes), '}'
+            if c == '|' and context in ('choice', 'pick'):
+                flush(); self.index += 1; return tuple(nodes), '|'
+            buf.append(c); self.index += 1
         flush()
         return tuple(nodes), None
 
+    def choice(self, depth: int, labelled: bool) -> Choice:
+        options = []
+        while True:
+            fact = None
+            if labelled:
+                m = LABEL.match(self.text, self.index)
+                if m is None: raise PromptSyntaxError(f'Expected named alternative in @pick near offset {self.index}')
+                fact = m.group(1)
+                self.index = m.end()
+            m = WEIGHT.match(self.text, self.index)
+            weight = float(m.group(1)) if m else 1.0
+            if m: self.index = m.end()
+            if not math.isfinite(weight) or weight <= 0:
+                raise PromptSyntaxError('Choice weight must be positive and finite')
+            body, stop = self.sequence(depth, 'pick' if labelled else 'choice')
+            body = _trim(body)
+            if not body: raise PromptSyntaxError('Empty alternatives are not allowed')
+            options.append(Option(body, weight, fact))
+            if stop == '}': break
+            if stop is None: raise PromptSyntaxError('Unclosed choice')
+        if len(options) < 2: raise PromptSyntaxError('Choices require at least two alternatives')
+        if labelled and len({o.fact for o in options}) != len(options):
+            raise PromptSyntaxError('Duplicate alternative labels in @pick')
+        self.node_count += 1
+        if self.node_count > MAX_NODES: raise PromptSyntaxError('Too many choices')
+        return Choice(tuple(options))
 
-def _trim_alternative(nodes: tuple[object, ...]) -> tuple[object, ...]:
-    """Trim branch-edge whitespace, including whitespace adjacent to leading tags.
 
-    Tags emit no text; spaces after a tag at a branch edge are formatting,
-    not an intentional leading space. Literal interior spacing is untouched.
-    """
+def _trim(nodes: tuple[object, ...]) -> tuple[object, ...]:
     items = list(nodes)
-    for direction in (1, -1):
-        indices = range(len(items)) if direction == 1 else range(len(items) - 1, -1, -1)
-        for i in indices:
-            node = items[i]
-            if isinstance(node, Tag):
-                continue
-            if isinstance(node, Literal):
-                trimmed = node.value.lstrip() if direction == 1 else node.value.rstrip()
-                items[i] = Literal(trimmed)
-                if not trimmed:
-                    continue
-            break
-    return tuple(n for n in items if not (isinstance(n, Literal) and not n.value))
+    if items and isinstance(items[0], Text): items[0] = Text(items[0].value.lstrip())
+    if items and isinstance(items[-1], Text): items[-1] = Text(items[-1].value.rstrip())
+    return tuple(x for x in items if not (isinstance(x, Text) and not x.value))
 
 
-def parse_rules(text: str, known_tags: set[str]) -> tuple[Rule | SoftRule, ...]:
-    rules: list[Rule | SoftRule] = []
-    for number, raw in enumerate(text.splitlines(), 1):
+def _facts(nodes: tuple[object, ...]) -> set[str]:
+    result = set()
+    for node in nodes:
+        if isinstance(node, Choice):
+            for opt in node.options:
+                if opt.fact: result.add(opt.fact)
+                result.update(_facts(opt.nodes))
+        if isinstance(node, If):
+            if _facts(node.nodes):
+                raise PromptSyntaxError('Labels inside @if are forbidden (conditional facts would be ambiguous)')
+    return result
+
+
+def _rules(text: str, facts: set[str]) -> tuple[tuple[Rule, ...], tuple[Preference, ...]]:
+    hard = []; soft = []
+    for index, raw in enumerate(text.splitlines(), 1):
         line = raw.strip()
-        if not line or line.startswith('#'):
-            continue
-        soft = SOFT_RULE_RE.fullmatch(line)
-        if soft:
-            trigger, target, weight_text = soft.groups()
-            weight = float(weight_text)
-            if not math.isfinite(weight) or weight <= 0 or trigger == target:
-                raise PromptSyntaxError(f'Invalid soft weight on line {number}')
-            rule: Rule | SoftRule = SoftRule(trigger, target, weight)
-            if any(isinstance(x, SoftRule) and (x.trigger, x.target) == (trigger, target) for x in rules):
-                raise PromptSyntaxError(f'Duplicate soft rule on line {number}')
+        if not line or line.startswith('#'): continue
+        m = HARD.fullmatch(line)
+        if m:
+            a, neg, b = m.groups()
+            rule = Rule(a, b, not bool(neg))
+            if a == b and neg: raise PromptSyntaxError(f'Self-excluding rule at line {index}')
+            if Rule(a, b, not rule.positive) in hard: raise PromptSyntaxError('Contradictory hard rules')
+            if rule not in hard: hard.append(rule)
         else:
-            hard = RULE_RE.fullmatch(line)
-            if hard is None:
-                raise PromptSyntaxError(f'Invalid rule on line {number}: {line!r}')
-            trigger, negation, target = hard.groups()
-            if trigger == target and negation:
-                raise PromptSyntaxError(f'Self-excluding rule on line {number}')
-            rule = Rule(trigger, target, not bool(negation))
-            if Rule(trigger, target, not rule.required) in rules:
-                raise PromptSyntaxError(f'Contradictory rules on line {number}')
-        if rule.trigger not in known_tags or rule.target not in known_tags:
-            raise PromptSyntaxError(f'Unknown tag in rule on line {number}: {line!r}')
-        if rule not in rules:
-            rules.append(rule)
-    return tuple(rules)
+            m = SOFT.fullmatch(line)
+            if not m: raise PromptSyntaxError(f'Invalid rule on @rules line {index}: {line}')
+            a, b, value = m.groups()
+            factor = float(value)
+            if not math.isfinite(factor) or factor <= 0: raise PromptSyntaxError('Invalid soft weight')
+            rule = Preference(a, b, factor)
+            if rule in soft: raise PromptSyntaxError('Duplicate preference')
+            soft.append(rule)
+        if a not in facts or b not in facts:
+            raise PromptSyntaxError(f'Unknown label in rule on line {index}: {a} / {b}')
+    return tuple(hard), tuple(soft)
 
 
-def _all_tags(nodes: tuple[object, ...]) -> frozenset[str]:
-    result: set[str] = set()
+def _validate_conditions(nodes: tuple[object, ...], facts: set[str]) -> None:
     for node in nodes:
-        if isinstance(node, Tag):
-            result.add(node.name)
+        if isinstance(node, If):
+            if node.fact not in facts: raise PromptSyntaxError(f'Unknown label in @if: {node.fact}')
+            _validate_conditions(node.nodes, facts)
         elif isinstance(node, Choice):
-            for alt in node.alternatives:
-                result.update(_all_tags(alt))
-    return frozenset(result)
+            for opt in node.options: _validate_conditions(opt.nodes, facts)
 
 
-@lru_cache(maxsize=32768)
-def _bounds(nodes: tuple[object, ...]) -> tuple[frozenset[str], frozenset[str]]:
-    required: set[str] = set()
-    possible: set[str] = set()
+def _contains_fact(nodes: tuple[object, ...]) -> bool:
     for node in nodes:
-        if isinstance(node, Tag):
-            required.add(node.name)
-            possible.add(node.name)
+        if isinstance(node, Choice):
+            if any(option.fact or _contains_fact(option.nodes) for option in node.options):
+                return True
+        elif isinstance(node, If) and _contains_fact(node.nodes):
+            return True
+    return False
+
+
+def _render(nodes: tuple[object, ...], facts: set[str], rng: random.Random) -> str:
+    out = []
+    for node in nodes:
+        if isinstance(node, Text):
+            out.append(node.value)
+        elif isinstance(node, If):
+            out.append(_render(node.nodes, facts, rng) if node.fact in facts else '\u0000')
         elif isinstance(node, Choice):
-            subs = [_bounds(alt) for alt in node.alternatives]
-            required.update(set.intersection(*(set(x[0]) for x in subs)))
-            possible.update(set.union(*(set(x[1]) for x in subs)))
-    return frozenset(required), frozenset(possible)
-
-
-def _satisfiable(nodes: tuple[object, ...], rules: tuple[Rule, ...]) -> bool:
-    forced, possible = _bounds(nodes)
-    return all(rule.trigger not in forced or
-               (rule.target in possible if rule.required else rule.target not in forced)
-               for rule in rules)
-
-
-def _soft_levels(rules: tuple[SoftRule, ...]) -> dict[str, int]:
-    graph: dict[str, set[str]] = {}
-    indegree: dict[str, int] = {}
-    for r in rules:
-        graph.setdefault(r.trigger, set())
-        indegree.setdefault(r.trigger, 0)
-        indegree.setdefault(r.target, 0)
-        if r.target not in graph[r.trigger]:
-            graph[r.trigger].add(r.target)
-            indegree[r.target] += 1
-    queue = deque(k for k, v in indegree.items() if v == 0)
-    order: list[str] = []
-    while queue:
-        name = queue.popleft()
-        order.append(name)
-        for target in sorted(graph.get(name, ())):
-            indegree[target] -= 1
-            if indegree[target] == 0:
-                queue.append(target)
-    if len(order) != len(indegree):
-        raise PromptSyntaxError('Cyclic soft preferences are ambiguous')
-    levels: dict[str, int] = {}
-    for name in reversed(order):
-        levels[name] = max((levels[t] + 1 for t in graph.get(name, ())), default=0)
-    return levels
-
-
-def _render(nodes: tuple[object, ...]) -> tuple[str, set[str]]:
-    tags = {n.name for n in nodes if isinstance(n, Tag)}
-    out: list[str] = []
-    total = 0
-    for node in nodes:
-        if isinstance(node, Literal):
-            part = node.value
-        elif isinstance(node, When):
-            part = node.text if node.tag in tags else ''
-        elif isinstance(node, Tag):
-            continue
+            if _contains_fact((node,)):
+                raise AssertionError('Unresolved labeled choice')
+            choice = rng.choices(node.options, weights=[o.weight for o in node.options], k=1)[0]
+            out.append(_render(choice.nodes, facts, rng))
         else:
-            raise PromptSyntaxError('Unresolved choice during rendering')
-        total += len(part)
-        if total > MAX_EXPANDED_CHARS:
-            raise PromptSyntaxError('Rendered prompt exceeds character limit')
-        out.append(part)
-    return ''.join(out), tags
+            raise AssertionError('Unknown AST node')
+    text = ''.join(out)
+    # Remove gaps caused only by suppressed conditionals; literal spaces and
+    # line breaks elsewhere remain untouched.
+    return re.sub(r'[ \t]*\x00[ \t]*', lambda m: ' ' if m.group().startswith((' ', '\t')) and m.group().endswith((' ', '\t')) else '', text)
 
 
 def expand_prompt(template: str, seed: int = 0) -> str:
-    """Expand and validate a seeded prompt, preserving all supported constructs."""
-    if not isinstance(template, str):
-        raise PromptSyntaxError('Prompt must be a string')
-    prompt, rules_text = split_inline_rules(template)
-    prompt = expand_definitions(prompt)
-    if len(prompt) > MAX_EXPANDED_CHARS:
-        raise PromptSyntaxError('Prompt exceeds character limit')
-    tree = Parser(prompt).parse()
-    known = _all_tags(tree)
-
-    def check_whens(nodes: tuple[object, ...]) -> None:
-        for n in nodes:
-            if isinstance(n, When) and n.tag not in known:
-                raise PromptSyntaxError(f'Unknown conditional tag {n.tag!r}')
-            if isinstance(n, Choice):
-                for alt in n.alternatives:
-                    check_whens(alt)
-    check_whens(tree)
-    parsed = parse_rules(rules_text, set(known))
-    hard = tuple(x for x in parsed if isinstance(x, Rule))
-    soft = tuple(x for x in parsed if isinstance(x, SoftRule))
-    levels = _soft_levels(soft)
+    if not isinstance(template, str): raise PromptSyntaxError('Prompt must be a string')
+    if '[[' in template or ']]' in template:
+        raise PromptSyntaxError('Legacy [[...]] syntax is removed; use @pick, @if, @define and @rules')
+    source, definitions, rules_text = _extract(template)
+    source = _resolve(source, definitions)
+    if re.search(r'(?<!\\)__(?:[A-Za-z0-9_./-]+)__', source):
+        raise PromptSyntaxError('File-backed __wildcards__ are not supported; expand them upstream in a wildcard node')
+    tree = Parser(source).parse()
+    facts = _facts(tree)
+    _validate_conditions(tree, facts)
+    hard, preferences = _rules(rules_text, facts)
     rng = random.Random(seed)
-    drivers = {r.trigger for r in hard}
-    soft_sources = {r.trigger for r in soft}
-    targets = {r.target for r in parsed}
 
-    if not parsed:
-        nodes = tree
-        while True:
-            found = next(((i, n) for i, n in enumerate(nodes) if isinstance(n, Choice)), None)
-            if found is None:
-                return _render(nodes)[0]
-            i, choice = found
-            nodes = nodes[:i] + rng.choice(choice.alternatives) + nodes[i + 1:]
+    def valid(selected: set[str]) -> bool:
+        return all(r.source not in selected or ((r.target in selected) == r.positive) for r in hard)
 
-    stack = [tree]
+    # Without constraints, choose in linear time, including nested alternatives.
+    if not hard and not preferences:
+        def choose(nodes):
+            output = []
+            selected = set()
+            for n in nodes:
+                if isinstance(n, Choice):
+                    option = rng.choices(n.options, weights=[o.weight for o in n.options], k=1)[0]
+                    branch, branch_facts = choose(option.nodes)
+                    output.extend(branch)
+                    selected.update(branch_facts)
+                    if option.fact: selected.add(option.fact)
+                else: output.append(n)
+            return tuple(output), selected
+        resolved, selected = choose(tree)
+        rendered = _render(resolved, selected, rng).strip()
+        if len(rendered) > MAX_EXPANDED_CHARS: raise PromptSyntaxError('Rendered prompt exceeds size limit')
+        return rendered
+
+    # Exact globally weighted sample over all complete valid selections using
+    # weighted reservoir sampling (streaming, no storage of exponentially many strings).
+    total = 0.0
+    selected_result = None
     explored = 0
-    while stack:
+
+    def walk(nodes, selected, product):
+        nonlocal total, selected_result, explored
+        first = next((i for i, n in enumerate(nodes) if isinstance(n, Choice) and _contains_fact((n,))), None)
+        if first is not None:
+            node = nodes[first]
+            option_total = sum(o.weight for o in node.options)
+            for option in node.options:
+                next_selected = selected | ({option.fact} if option.fact else set())
+                # Keep nested choices in their original slot.
+                walk(nodes[:first] + option.nodes + nodes[first+1:], next_selected, product * (option.weight / option_total))
+            return
         explored += 1
-        if explored > MAX_SEARCH_STATES:
-            raise PromptSyntaxError(f'Constraint search exceeded {MAX_SEARCH_STATES} states')
-        nodes = stack.pop()
-        if not _satisfiable(nodes, hard):
-            continue
-        frontier = [(i, n) for i, n in enumerate(nodes) if isinstance(n, Choice)]
-        if not frontier:
-            output, tags = _render(nodes)
-            if all(r.trigger not in tags or ((r.target in tags) == r.required) for r in hard):
-                return output
-            continue
+        if explored > MAX_VALID_STATES:
+            raise PromptSyntaxError(f'Exact constraint sampling limit exceeded ({MAX_VALID_STATES} selections)')
+        if not valid(selected): return
+        factor = product
+        for pref in preferences:
+            if pref.source in selected and pref.target in selected:
+                factor *= pref.factor
+        if not math.isfinite(factor): raise PromptSyntaxError('Selection weights overflow; reduce weights')
+        if factor <= 0: return
+        total += factor
+        if not math.isfinite(total): raise PromptSyntaxError('Total weights overflow; reduce weights')
+        if rng.random() * total < factor:
+            selected_result = (nodes, selected)
 
-        def priority(item: tuple[int, Choice]) -> tuple[int, int]:
-            possible = _bounds((item[1],))[1]
-            sources = possible & soft_sources
-            if sources:
-                return 3, max(levels[x] for x in sources)
-            if possible & drivers:
-                return 2, 0
-            if possible & targets:
-                return 1, 0
-            return 0, 0
-
-        i, choice = max(frontier, key=priority)
-        candidates = [alt for alt in choice.alternatives if _satisfiable(nodes[:i] + alt + nodes[i + 1:], hard)]
-        forced = _bounds(nodes)[0]
-        active = [r for r in soft if r.trigger in forced and r.target not in forced]
-        if active:
-            def score(alt: tuple[object, ...]) -> float:
-                guaranteed = _bounds(nodes[:i] + alt + nodes[i + 1:])[0]
-                weight = sum(math.log(r.weight) for r in active if r.target in guaranteed)
-                u = max(1e-15, min(1 - 1e-15, rng.random()))
-                return -math.log(-math.log(u)) + weight
-            candidates.sort(key=score, reverse=True)
-        else:
-            rng.shuffle(candidates)
-        for alt in reversed(candidates):
-            stack.append(nodes[:i] + alt + nodes[i + 1:])
-    raise PromptSyntaxError('No rule-consistent expansion exists for this template')
+    walk(tree, set(), 1.0)
+    if selected_result is None: raise PromptSyntaxError('No rule-consistent expansion exists')
+    result = _render(*selected_result, rng).strip()
+    if len(result) > MAX_EXPANDED_CHARS: raise PromptSyntaxError('Rendered prompt exceeds size limit')
+    return result

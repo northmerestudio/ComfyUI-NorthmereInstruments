@@ -6,11 +6,31 @@ ComfyUI custom nodes by [Northmere Studio](https://github.com/NorthmereStudio).
 
 Expands seeded `{a|b}` choices into a `STRING`. Supported syntax:
 
-- **Choices:** `{red|blue}`; nesting works too: `{small|{medium|large}}`.
-- **Tags:** `[[#day]]` labels a choice without appearing in the output.
-- **Rules:** Put a `[[RULES]]` / `[[/RULES]]` block at the **end** of the prompt. `day -> sun` requires `sun` when `day` is selected; `day -> !night` excludes `night`; `day ~> sun @ 3` favors `sun` (soft preference).
-- **Reuse:** Define a standalone `[[DEF name]]` ... `[[/DEF]]` block, then insert it with `[[USE name]]`.
-- **Conditional text:** `[[WHEN day]]bright light[[/WHEN]]` appears only if the `day` tag is selected; its contents must be plain text.
+- **Choices:** `{red|blue}`; nesting works too: `{small|{medium|large}}`. Use `{3::red|1::blue}` for relative weights.
+- **Named choices:** `@pick{day: sunny|night: moonlit}` labels the selected alternative without putting its label in the output. Labels are Boolean facts for the current expansion; the same label may occur in multiple named choices.
+- **Rules:** Put an `@rules` ... `@end` block on its own lines. `day -> sun` requires `sun` when `day` is selected; `day -> !night` excludes `night`; `day ~> sun @ 3` multiplies the weight of complete selections containing both labels by 3. Rule labels must be declared in named choices.
+- **Reuse:** Define a standalone `@define name` ... `@end` block, then insert it with `@use(name)`. Each use expands independently.
+- **Conditional text:** `@if(day){bright light}` appears only if `day` was selected. It can contain ordinary nested choices, but not new named choices.
+
+Example:
+
+```text
+@pick{day: sunny landscape|night: moonlit landscape},
+@pick{soft: soft light|flash: studio flash}.
+@if(day){ Warm {golden|gentle} colors.}
+
+@rules
+  day -> !flash
+@end
+```
+
+Structural whitespace around choices, labels, directives, and rule operators is tolerated. Literal prompt whitespace is generally preserved. Escape syntax characters with a backslash, such as `\{` and `\|`.
+
+**Breaking syntax change:** The old `[[...]]` tags, definitions, conditions, and rules are **not supported**. Existing templates must be rewritten. The node identifier remains unchanged.
+
+**Wildcards:** Inline choices and weights resemble ComfyUI Wildcards syntax, but file-backed `__name__` wildcards are **not** resolved here. Expand those in an upstream wildcard node. Northmere constraints apply only to Northmere's own named choices.
+
+Hard rules are enforced during seeded selection; impossible rules and excessive search spaces produce errors instead of silently returning an invalid prompt.
 
 ## LoRA Envelope
 
