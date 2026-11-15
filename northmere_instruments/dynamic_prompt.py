@@ -15,13 +15,13 @@ class DynamicPromptNode(io.ComfyNode):
             node_id='NorthmereInstruments.DynamicPrompt',
             display_name='Dynamic Prompt (Rules)',
             category=CATEGORY,
-            description='Seeded {a|b} expansion with an optional [[RULES]] block at the bottom.',
+            description='Seeded choices, reusable [[DEF]] sections, conditional [[WHEN]] text, and hard/soft rules.',
             search_aliases=['northmere', 'dynamic prompt', 'seeded prompt', 'prompt rules'],
             inputs=[
                 io.String.Input(
                     'template', multiline=True, default='',
-                    tooltip='Nested {one|two} choices and [[#tag]] markers; '
-                    'add [[RULES]] ... [[/RULES]] at the end.',
+                    tooltip='Nested {one|two} choices, [[#tag]], [[DEF name]]/[[USE name]], '
+                    '[[WHEN tag]], and a final [[RULES]] block (-> or ~>).',
                 ),
                 io.Int.Input('seed', default=0, min=0, max=0xFFFFFFFFFFFFFFFF,
                              control_after_generate=True,

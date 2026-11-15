@@ -189,3 +189,185 @@ def test_unconstrained_seed_mapping_stays_compatible():
         'A red hat and small bag',
         'A blue hat and small bag',
     ]
+
+# Scene-aware prompt additions: definition reuse, conditional text, soft rules.
+
+def test_definitions_expand_fresh_per_use_and_allow_forward_references():
+    template = (
+        '[[USE gaze]] / [[USE gaze]]\n'
+        '[[DEF gaze]]\n{left|right}\n[[/DEF]]\n'
+    )
+    results = {expand_prompt(template, seed).strip() for seed in range(120)}
+    assert results == {'left / left', 'left / right', 'right / left', 'right / right'}
+    assert expand_prompt(template, 18) == expand_prompt(template, 18)
+
+
+def test_definitions_do_not_leave_leading_or_trailing_blank_lines():
+    template = '[[DEF note]]\nclear details\n[[/DEF]]\n\n[[USE note]]\n'
+    assert expand_prompt(template) == 'clear details'
+
+
+def test_nested_definitions_and_unused_tags_do_not_affect_constraints():
+    template = (
+        '[[DEF lighting]]\n[[USE direction]] light\n[[/DEF]]\n'
+        '[[DEF direction]]\n{soft|bright}\n[[/DEF]]\n'
+        '[[DEF unused]]\n[[#forbidden]]invalid\n[[/DEF]]\n'
+        '[[#selected]]Scene: [[USE lighting]]\n'
+        '[[RULES]]\nselected -> !forbidden\n[[/RULES]]'
+    )
+    # An unused definition cannot contribute a tag, so the rule must reject
+    # a target that exists only inside that unused definition.
+    with pytest.raises(PromptSyntaxError, match='Unknown target tag'):
+        expand_prompt(template)
+    assert {expand_prompt(template.split('[[RULES]]')[0], s).strip() for s in range(40)} == {
+        'Scene: soft light', 'Scene: bright light',
+    }
+
+
+@pytest.mark.parametrize('source, message', [
+    ('[[USE missing]]', 'Unknown definition'),
+    ('[[DEF x]]\na\n[[/DEF]]\n[[DEF x]]\nb\n[[/DEF]]\n[[USE x]]', 'Duplicate definition'),
+    ('[[DEF a]]\n[[USE b]]\n[[/DEF]]\n[[DEF b]]\n[[USE a]]\n[[/DEF]]\n[[USE a]]',
+     'Recursive definition'),
+    ('[[DEF a]] body [[/DEF]]', 'standalone'),
+    ('[[USE bad name]]', 'Invalid'),
+])
+def test_reference_errors_are_explicit(source, message):
+    with pytest.raises(PromptSyntaxError, match=message):
+        expand_prompt(source)
+
+
+def test_when_uses_final_tags_even_when_text_precedes_tag_and_is_nested():
+    template = (
+        'Photograph[[WHEN indoors]], soft ambient light[[/WHEN]]. '
+        '{[[#indoors]]Inside|Outside}. '
+        '{detail[[WHEN indoors]] indoors[[/WHEN]]|plain}'
+    )
+    outputs = {expand_prompt(template, seed) for seed in range(80)}
+    assert any('Inside' in output and 'ambient light' in output for output in outputs)
+    assert any('Outside' in output and 'ambient light' not in output for output in outputs)
+    assert all(('Inside' in output) == ('ambient light' in output) for output in outputs)
+    assert all(('Outside' not in output) == ('detail indoors' in output)
+               for output in outputs if 'detail' in output)
+
+
+def test_when_works_after_definition_substitution():
+    text = (
+        '[[DEF face_note]]\nHer face is out of frame.\n[[/DEF]]\n'
+        '[[WHEN partner]][[USE face_note]][[/WHEN]] '
+        '{[[#partner]]two people|one person}'
+    )
+    for seed in range(40):
+        output = expand_prompt(text, seed)
+        assert ('Her face' in output) == ('two people' in output)
+
+
+@pytest.mark.parametrize('text, message', [
+    ('[[WHEN missing]]text[[/WHEN]]', 'Unknown conditional tag'),
+    ('[[WHEN x]]text', 'Unclosed'),
+    ('[[/WHEN]]', 'Unexpected'),
+    ('[[WHEN x]]{a|b}[[/WHEN]] [[#x]]', 'plain text'),
+    ('[[WHEN x]][[#y]]bad[[/WHEN]] [[#x]] [[#y]]', 'plain text'),
+    ('[[WHEN x]][[WHEN y]]nested[[/WHEN]][[/WHEN]] [[#x]] [[#y]]', 'plain text'),
+])
+def test_when_rejects_ambiguous_markup(text, message):
+    with pytest.raises(PromptSyntaxError, match=message):
+        expand_prompt(text)
+
+
+def test_soft_rule_biases_target_without_biasing_source():
+    # Target appears first in the template: source-first selection must still
+    # make the context effective, but not make the source itself more common.
+    template = (
+        '{[[#light]]window light|flash}, {[[#room]]window room|plain backdrop}\n'
+        '[[RULES]]\nroom ~> light @ 4\n[[/RULES]]'
+    )
+    outcomes = [expand_prompt(template, seed) for seed in range(4000)]
+    room = [item for item in outcomes if 'window room' in item]
+    backdrop = [item for item in outcomes if 'plain backdrop' in item]
+    assert 1700 < len(room) < 2300  # P(source) ~= 1/2
+    assert 0.75 < sum(item.startswith('window light') for item in room) / len(room) < 0.85
+    assert 0.45 < sum(item.startswith('window light') for item in backdrop) / len(backdrop) < 0.55
+    assert expand_prompt(template, 42) == expand_prompt(template, 42)
+
+
+def test_soft_discouragement_keeps_unfavored_option_available():
+    template = (
+        '[[#small]]Small area, {[[#far]]long lens|normal lens}\n'
+        '[[RULES]]\nsmall ~> far @ 0.1\n[[/RULES]]'
+    )
+    outputs = [expand_prompt(template, seed) for seed in range(1000)]
+    count = sum('long lens' in item for item in outputs)
+    assert 50 < count < 150
+
+
+def test_hard_rules_take_precedence_over_soft_preferences():
+    template = (
+        '[[#small]]small room {[[#far]]far shot|[[#near]]near shot}\n'
+        '[[RULES]]\nsmall -> !far\nsmall ~> far @ 1000\n[[/RULES]]'
+    )
+    assert all('near shot' in expand_prompt(template, seed) for seed in range(100))
+
+
+def test_soft_rule_sources_are_chosen_in_dependency_order():
+    template = (
+        '{[[#c]]C|plain-c} {[[#b]]B|plain-b} {[[#a]]A|plain-a}\n'
+        '[[RULES]]\na ~> b @ 100\nb ~> c @ 100\n[[/RULES]]'
+    )
+    outputs = [expand_prompt(template, seed) for seed in range(600)]
+    chosen_a = [o for o in outputs if o.endswith(' A')]
+    assert 230 < len(chosen_a) < 370
+    assert sum(' B ' in o for o in chosen_a) / len(chosen_a) > 0.95
+    assert sum(o.startswith('C ') for o in chosen_a) / len(chosen_a) > 0.9
+
+
+@pytest.mark.parametrize('rule, match', [
+    ('a ~> b @ 0', 'Invalid soft rule'),
+    ('a ~> b @ -2', 'Invalid rule'),
+    ('a ~> b @ nan', 'Invalid rule'),
+    ('a ~> b @ 1e999', 'Invalid soft rule'),
+    ('a ~> a @ 2', 'Invalid soft rule'),
+    ('a ~> missing @ 2', 'Unknown tag'),
+    ('a ~> b @ 2\na ~> b @ 3', 'Duplicate soft rule'),
+    ('a ~> b @ 2\nb ~> a @ 3', 'Cyclic soft'),
+])
+def test_bad_soft_rules_fail_clearly(rule, match):
+    template = f'[[#a]]A {{[[#b]]B|none}}\n[[RULES]]\n{rule}\n[[/RULES]]'
+    with pytest.raises(PromptSyntaxError, match=match):
+        expand_prompt(template)
+
+
+def test_soft_rule_with_nested_target_works_when_target_becomes_guaranteed():
+    template = (
+        '[[#room]]room {neutral|{[[#soft]]soft light|hard light}}\n'
+        '[[RULES]]\nroom ~> soft @ 20\n[[/RULES]]'
+    )
+    outputs = [expand_prompt(template, seed) for seed in range(1000)]
+    assert sum('soft light' in o for o in outputs) > 400
+    assert any('neutral' in o for o in outputs)
+
+
+def test_expansion_size_limit(monkeypatch):
+    from northmere_instruments import dynamic_prompt_engine as engine
+    monkeypatch.setattr(engine, 'MAX_EXPANDED_CHARS', 8)
+    with pytest.raises(PromptSyntaxError, match='Expanded prompt exceeds'):
+        expand_prompt('[[DEF a]]\nhello!\n[[/DEF]]\n[[USE a]][[USE a]]')
+
+
+def test_definitions_conditions_soft_and_hard_rules_compose():
+    template = (
+        '[[DEF illumination]]\n{[[#soft]]soft daylight|[[#flash]]flash}\n[[/DEF]]\n'
+        '{[[#window]]window room|[[#studio]]studio} with [[USE illumination]]. '
+        '[[WHEN window]]A window frame is visible. [[/WHEN]]'
+        '[[WHEN soft]]Soft shadows are visible.[[/WHEN]]\n'
+        '[[RULES]]\nwindow -> !flash\nwindow ~> soft @ 6\n[[/RULES]]'
+    )
+    for seed in range(300):
+        result = expand_prompt(template, seed)
+        assert '[[' not in result and '{' not in result
+        if 'window room' in result:
+            assert 'flash' not in result and 'soft daylight' in result
+            assert 'A window frame is visible.' in result
+        if 'studio' in result:
+            assert 'A window frame is visible.' not in result
+        assert ('Soft shadows are visible.' in result) == ('soft daylight' in result)

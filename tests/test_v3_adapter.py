@@ -84,7 +84,8 @@ def plugin(monkeypatch: pytest.MonkeyPatch, tmp_path: Path):
     sys.modules[pkg_name] = package
     spec.loader.exec_module(package)
     extension = asyncio.run(package.comfy_entrypoint())
-    node_class, = asyncio.run(extension.get_node_list())
+    node_class = next(node for node in asyncio.run(extension.get_node_list())
+                      if node.__name__ == 'LoRAEnvelopeNode')
     yield node_class, lora, utils
     for key in list(sys.modules):
         if key.startswith(pkg_name):
