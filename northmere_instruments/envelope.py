@@ -6,6 +6,7 @@ Y is the actual signed model LoRA multiplier (no remapping).
 from __future__ import annotations
 
 from dataclasses import dataclass
+from typing import Any
 import json
 import math
 from bisect import bisect_right
@@ -75,7 +76,7 @@ class LoRAEnvelope:
     slopes: tuple[float, ...]
 
     @classmethod
-    def from_json(cls, payload: str | dict) -> 'LoRAEnvelope':
+    def from_json(cls, payload: str | dict[str, Any]) -> 'LoRAEnvelope':
         try:
             data = json.loads(payload) if isinstance(payload, str) else payload
         except json.JSONDecodeError as exc:

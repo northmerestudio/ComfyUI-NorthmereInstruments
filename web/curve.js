@@ -422,6 +422,10 @@ function createCurveEditor(node, inputName, inputData) {
   svg.addEventListener('pointerup', endDrag);
   svg.addEventListener('pointercancel', endDrag);
   const editInspector = () => {
+    // Empty number inputs coerce to zero in JavaScript; reject incomplete edits.
+    if (xInput.value.trim() === '' || yInput.value.trim() === '') {
+      render(); return;
+    }
     const x = Number(xInput.value);
     const y = Number(yInput.value);
     if (!Number.isFinite(x) || !Number.isFinite(y) || y < -20 || y > 20 || x < 0 || x > 1) {

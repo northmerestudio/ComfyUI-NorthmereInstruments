@@ -75,7 +75,9 @@ assert.equal(selectors.length, 2, 'one preset selector and one interpolation sel
 const presetSelect = selectors[0];
 const interpolationSelect = selectors[1];
 assert.deepEqual(presetSelect.children.map((option) => option.textContent),
-  ['Custom', 'Off', 'Full LoRA', 'Fade in · linear', 'Fade in · halfway', 'Quick rise']);
+  ['Custom', 'Off', 'Full Strength', 'Fade In', 'Fade Out', 'Ease In', 'Ease Out',
+    'Early Fade In', 'Late Fade In', 'Late Fade In (75%)', 'Late On',
+    'Start at 25%', 'Start at 50%']);
 assert.equal(presetSelect.value, 'quick-rise');
 assert.equal(presetSelect.children[0].disabled, true, 'Custom cannot be applied as a preset');
 for (const [name, first, last] of [
@@ -102,6 +104,11 @@ assert.equal(curve().points[0][1], 0, 'early fade starts at zero');
 assert.ok(Math.abs(curve().points[1][1] - (1 - Math.exp(-1)) / (1 - Math.exp(-4))) < 1e-12,
   'early fade uses normalized exponential ease out');
 assert.ok(curve().points.slice(4).every(([, y]) => y === 1), 'early fade holds full strength after halfway');
+presetSelect.value = 'ease-in'; presetSelect.dispatch('change');
+assert.equal(curve().interpolation, 'smooth', 'ease-in selects smooth interpolation');
+presetSelect.value = 'late-on'; presetSelect.dispatch('change');
+assert.equal(curve().interpolation, 'hold', 'late-on selects hold interpolation');
+presetSelect.value = 'early-fade-in'; presetSelect.dispatch('change');
 const earlyFadeSaved = node.widget.getValue();
 node.widget.setValue(earlyFadeSaved);
 assert.equal(presetSelect.value, 'early-fade-in', 'early fade restores from saved curve');
@@ -138,6 +145,8 @@ assert.equal(all.find((e) => e.className === 'nmi-validation').hidden, true);
 buttons.find((e) => e.textContent === '+ Keyframe').click();
 assert.deepEqual(curve().points, [[0, -1], [0.25, -1], [0.5, 2], [1, 0]]);
 assert.equal(byText('span', 'Keyframe 2 / 4').textContent, 'Keyframe 2 / 4');
+controls[1].value = ''; controls[1].dispatch('change');
+assert.equal(curve().points[1][1], -1, 'empty weight field does not silently become zero');
 controls[1].value = '-2'; controls[1].dispatch('change');
 assert.equal(curve().points[1][1], -2);
 assert.equal(presetSelect.value, 'custom', 'editing a preset creates a custom curve');
