@@ -1,7 +1,6 @@
 [build-system]
 requires = ["setuptools>=77", "wheel"]
 build-backend = "setuptools.build_meta"
-
 [project]
 name = "comfyui-northmere-instruments"
 version = "0.5.0"
@@ -11,9 +10,8 @@ requires-python = ">=3.10"
 license = "MIT"
 license-files = ["LICENSE"]
 authors = [{ name = "Northmere Studio" }]
-keywords = ["comfyui", "lora", "envelope", "denoising", "custom-nodes"]
+keywords = ["comfyui", "lora", "envelope", "denoising", "custom-nodes", "dynamic-prompt", "prompt-rules"]
 classifiers = ["Programming Language :: Python :: 3", "Operating System :: OS Independent"]
-
 [project.urls]
 Repository = "https://github.com/NorthmereStudio/ComfyUI-NorthmereInstruments"
 

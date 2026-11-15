@@ -8,13 +8,12 @@ from .dynamic_prompt_engine import expand_prompt
 
 CATEGORY = 'Northmere Instruments/Prompt'
 
-
 class DynamicPromptNode(io.ComfyNode):
     @classmethod
     def define_schema(cls) -> io.Schema:
         return io.Schema(
             node_id='NorthmereInstruments.DynamicPrompt',
-            display_name='Dynamic Prompt',
+            display_name='Dynamic Prompt (Rules)',
             category=CATEGORY,
             description='Seeded {a|b} expansion with an optional [[RULES]] block at the bottom.',
             search_aliases=['northmere', 'dynamic prompt', 'seeded prompt', 'prompt rules'],
@@ -30,7 +29,6 @@ class DynamicPromptNode(io.ComfyNode):
             ],
             outputs=[io.String.Output(display_name='prompt')],
         )
-
     @classmethod
     def execute(cls, template: str, seed: int) -> io.NodeOutput:
         return io.NodeOutput(expand_prompt(template, seed=seed))

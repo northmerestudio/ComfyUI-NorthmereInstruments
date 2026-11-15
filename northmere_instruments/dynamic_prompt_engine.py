@@ -8,12 +8,11 @@ from __future__ import annotations
 import random
 import re
 from dataclasses import dataclass
-
 TAG_RE = re.compile(r"\[\[#([A-Za-z][A-Za-z0-9_]*)\]\]")
 RULE_RE = re.compile(r"^([A-Za-z][A-Za-z0-9_]*)\s*->\s*(!?)([A-Za-z][A-Za-z0-9_]*)$")
 MAX_CHOICES = 4096
 MAX_DEPTH = 64
-MAX_ATTEMPTS = 512
+MAX_SEARCH_STATES = 100_000
 RULES_START = '[[RULES]]'
 RULES_END = '[[/RULES]]'
 RULES_BLOCK_RE = re.compile(
@@ -22,7 +21,6 @@ RULES_BLOCK_RE = re.compile(
     r'^[ \t]*\[\[/RULES\]\][ \t]*(?:\r?\n|\Z)',
     re.DOTALL | re.MULTILINE,
 )
-
 class PromptSyntaxError(ValueError):
     """Invalid prompt markup or dependency rules."""
 
@@ -48,7 +46,6 @@ class Rule:
     target: str
     required: bool
 
-
 class Parser:
     def __init__(self, template: str) -> None:
         self.text = template
@@ -59,13 +56,11 @@ class Parser:
         output, delimiter = self._sequence(0, root=True)
         assert delimiter is None
         return output
-
     def _sequence(self, depth: int, *, root: bool = False) -> tuple[tuple[object, ...], str | None]:
         if depth > MAX_DEPTH:
             raise PromptSyntaxError(f"Brace nesting exceeds {MAX_DEPTH} levels")
         parts: list[object] = []
         buf: list[str] = []
-
         def flush() -> None:
             if buf:
                 raw = ''.join(buf)
@@ -78,7 +73,6 @@ class Parser:
                 if cursor < len(raw):
                     parts.append(Literal(raw[cursor:]))
                 buf.clear()
-
         while self.pos < len(self.text):
             char = self.text[self.pos]
             if char == '\\' and self.pos + 1 < len(self.text) and self.text[self.pos + 1] in r'{}|\\':
@@ -118,7 +112,6 @@ class Parser:
         flush()
         return tuple(parts), None
 
-
 def split_inline_rules(template: str) -> tuple[str, str]:
     """Read one optional rules block at the very end of the template.
 
@@ -130,7 +123,6 @@ def split_inline_rules(template: str) -> tuple[str, str]:
         return template, ''
     if starts != 1 or ends != 1:
         raise PromptSyntaxError('Expected exactly one [[RULES]] / [[/RULES]] pair')
-
     match = RULES_BLOCK_RE.search(template)
     if not match or template[match.end():].strip():
         raise PromptSyntaxError(
@@ -139,7 +131,6 @@ def split_inline_rules(template: str) -> tuple[str, str]:
     # The final newline separates the content from the metadata marker.
     prompt = template[:match.start()].rstrip('\r\n')
     return prompt, match.group('rules')
-
 
 def parse_rules(text: str, known_tags: set[str]) -> tuple[Rule, ...]:
     rules: list[Rule] = []
@@ -167,7 +158,6 @@ def parse_rules(text: str, known_tags: set[str]) -> tuple[Rule, ...]:
             rules.append(rule)
     return tuple(rules)
 
-
 def _all_tags(nodes: tuple[object, ...]) -> set[str]:
     found: set[str] = set()
     for node in nodes:
@@ -178,18 +168,44 @@ def _all_tags(nodes: tuple[object, ...]) -> set[str]:
                 found.update(_all_tags(alternative))
     return found
 
+def _tag_bounds(
+    nodes: tuple[object, ...], cache: dict[int, tuple[set[str], set[str]]]
+) -> tuple[set[str], set[str]]:
+    """Return guaranteed and possible tags, including unresolved nested choices.
 
-def _required_tags(nodes: tuple[object, ...]) -> set[str]:
-    """Tags guaranteed by the selected nodes, not merely possible in subchoices."""
+    Cache subtree bounds by Choice identity; choices are immutable during expansion.
+    """
     required: set[str] = set()
+    possible: set[str] = set()
     for node in nodes:
         if isinstance(node, Tag):
             required.add(node.name)
+            possible.add(node.name)
         elif isinstance(node, Choice):
-            required.update(set.intersection(*(
-                _required_tags(alternative) for alternative in node.alternatives
-            )))
-    return required
+            key = id(node)
+            if key not in cache:
+                alternatives = [_tag_bounds(option, cache) for option in node.alternatives]
+                forced = set.intersection(*(bounds[0] for bounds in alternatives))
+                available = set.union(*(bounds[1] for bounds in alternatives))
+                cache[key] = forced, available
+            forced, available = cache[key]
+            required.update(forced)
+            possible.update(available)
+    return required, possible
+
+
+def _can_satisfy(
+    nodes: tuple[object, ...], rules: tuple[Rule, ...],
+    cache: dict[int, tuple[set[str], set[str]]],
+) -> bool:
+    """Prune only when a rule is already impossible to satisfy."""
+    required, possible = _tag_bounds(nodes, cache)
+    return all(
+        rule.trigger not in required or (
+            rule.target in possible if rule.required else rule.target not in required
+        )
+        for rule in rules
+    )
 
 
 def _frontier(nodes: tuple[object, ...]) -> list[tuple[int, Choice]]:
@@ -201,7 +217,6 @@ def _violated(tags: set[str], rules: tuple[Rule, ...]) -> bool:
         rule.trigger in tags and (rule.target in tags) != rule.required
         for rule in rules
     )
-
 
 def _render(nodes: tuple[object, ...]) -> tuple[str, set[str]]:
     text: list[str] = []
@@ -215,69 +230,66 @@ def _render(nodes: tuple[object, ...]) -> tuple[str, set[str]]:
             raise AssertionError('Unresolved choice')
     return ''.join(text), tags
 
-
 def expand_prompt(template: str, seed: int = 0) -> str:
-    """Resolve a template, preferring rule drivers before their dependent choices.
+    """Expand choices with a seeded, driver-first constrained search.
 
-    The sampler retains equal-probability options when no rule applies. For
-    constrained prompts it samples feasible branches; conditional results are
-    not asserted to have identical global weights to unconstrained samples.
+    With no rules, choices are uniform and retain their previous seeded order.
+    With rules, alternatives are tried in random order, with backtracking when
+    necessary. The resulting *valid outputs* are not globally uniform.
     """
     prompt_text, rules_text = split_inline_rules(template)
     tree = Parser(prompt_text).parse()
-    known_tags = _all_tags(tree)
-    rules = parse_rules(rules_text, known_tags)
-    drivers = {rule.trigger for rule in rules}
-    dependent = {rule.target for rule in rules}
+    rules = parse_rules(rules_text, _all_tags(tree))
     rng = random.Random(seed)
 
-    for _attempt in range(MAX_ATTEMPTS):
+    if not rules:
+        # Keep existing seed-to-output behavior for unconstrained prompts.
         nodes = tree
-        for _step in range(MAX_CHOICES + 1):
-            frontier = _frontier(nodes)
-            if not frontier:
-                result, tags = _render(nodes)
-                if not _violated(tags, rules):
-                    return result
-                break
+        while frontier := _frontier(nodes):
+            index, choice = frontier[0]
+            nodes = nodes[:index] + rng.choice(choice.alternatives) + nodes[index + 1:]
+        return _render(nodes)[0]
 
-            # Resolve possible triggers first even if their group occurs later in
-            # the text, so 'blindfold -> !glasses' is not dominated by earlier
-            # glasses choices. This also applies to trigger tags nested in options.
-            def priority(entry: tuple[int, Choice]) -> int:
-                possible = _all_tags((entry[1],))
-                if possible & drivers:
-                    return 2
-                if possible & dependent:
-                    return 1
-                return 0
+    drivers = {rule.trigger for rule in rules}
+    dependent = {rule.target for rule in rules}
+    bounds_cache: dict[int, tuple[set[str], set[str]]] = {}
+    stack = [tree]
+    explored = 0
 
-            index, choice = max(frontier, key=priority)
-            current_tags = {node.name for node in nodes if isinstance(node, Tag)}
-            options: list[tuple[object, ...]] = []
-            for alternative in choice.alternatives:
-                candidate = current_tags | _required_tags(alternative)
-                # Reject only guaranteed conflicts. A tag in an unselected
-                # nested option must not disqualify its entire parent.
-                if any(
-                    rule.trigger in current_tags and not rule.required and rule.target in candidate
-                    for rule in rules
-                ):
-                    continue
-                if any(
-                    not rule.required and rule.trigger in candidate and rule.target in current_tags
-                    for rule in rules
-                ):
-                    continue
-                options.append(alternative)
-            if not options:
-                break
-            selected = rng.choice(options)
-            nodes = nodes[:index] + selected + nodes[index + 1:]
-        else:
-            raise PromptSyntaxError('Too many expansion steps')
+    while stack:
+        if explored >= MAX_SEARCH_STATES:
+            raise PromptSyntaxError(
+                f'Constraint search limit ({MAX_SEARCH_STATES} states) exceeded; '
+                'simplify the rules or reduce the number of choices.'
+            )
+        nodes = stack.pop()
+        explored += 1
+        if not _can_satisfy(nodes, rules, bounds_cache):
+            continue
 
-    raise PromptSyntaxError(
-        f'No rule-consistent expansion found after {MAX_ATTEMPTS} attempts. '
-        'Check mutually exclusive or unreachable required tags.'
-    )
+        frontier = _frontier(nodes)
+        if not frontier:
+            result, tags = _render(nodes)
+            if not _violated(tags, rules):
+                return result
+            continue
+
+        # Preserve the original preference for triggers over their dependents.
+        def priority(entry: tuple[int, Choice]) -> int:
+            possible = _tag_bounds((entry[1],), bounds_cache)[1]
+            if possible & drivers:
+                return 2
+            if possible & dependent:
+                return 1
+            return 0
+
+        index, choice = max(frontier, key=priority)
+        options = list(choice.alternatives)
+        rng.shuffle(options)
+        # LIFO stack: the first shuffled alternative is explored first.
+        for alternative in reversed(options):
+            candidate = nodes[:index] + alternative + nodes[index + 1:]
+            if _can_satisfy(candidate, rules, bounds_cache):
+                stack.append(candidate)
+
+    raise PromptSyntaxError('No rule-consistent expansion exists for this template.')
