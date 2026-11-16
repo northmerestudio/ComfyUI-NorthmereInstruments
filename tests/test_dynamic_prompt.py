@@ -182,3 +182,20 @@ def test_large_search_applies_soft_preferences_locally():
     assert len(source_results) > 70
     assert sum('src yes ' in r for r in source_results) / len(source_results) > 0.82
     assert results == [expand_prompt(template, seed) for seed in range(300)]
+
+
+def test_large_template_driver_first_selection_preserves_scene_frequency():
+    # If the outfit is chosen before the constrained scene, a rare special
+    # scene becomes about 50% probable despite being only 1 of 10 options.
+    # This regression test deliberately exceeds the exact sampling limit.
+    scenes = '|'.join([f'regular_scene: main{i}' for i in range(9)] +
+                      ['undressing_scene: special'])
+    template = '@pick{nude:nude|dressed:dressed} @pick{' + scenes + '} '
+    template += ' '.join(f'@pick{{p{i}:x|q{i}:y}}' for i in range(16))
+    template += ('\n@rules\nregular_scene -> nude\n'
+                 'undressing_scene -> dressed\n@end')
+    results = [expand_prompt(template, seed) for seed in range(320)]
+    regular = sum('main' in result for result in results)
+    assert 0.82 < regular / len(results) < 0.96
+    assert all(('dressed special' in result) or ('nude main' in result)
+               for result in results)

@@ -15,7 +15,7 @@ class DynamicPromptNode(io.ComfyNode):
             node_id='NorthmereInstruments.DynamicPrompt',
             display_name='Northmere Prompt v3',
             category=CATEGORY,
-            description='Seeded ComfyUI choices, labelled @pick alternatives, @if, @define, and exact rule-aware sampling.',
+            description='Seeded choices, labelled @pick alternatives, definitions, conditions and rule-aware sampling.',
             search_aliases=['northmere', 'dynamic prompt', 'seeded prompt', 'prompt rules'],
             inputs=[
                 io.String.Input(

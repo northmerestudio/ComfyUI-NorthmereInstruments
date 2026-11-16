@@ -26,12 +26,6 @@ Example:
 
 Structural whitespace around choices, labels, directives, and rule operators is tolerated. Literal prompt whitespace is generally preserved. Escape syntax characters with a backslash, such as `\{` and `\|`.
 
-**Breaking syntax change:** The old `[[...]]` tags, definitions, conditions, and rules are **not supported**. Existing templates must be rewritten. The node identifier remains unchanged.
-
-**Wildcards:** Inline choices and weights resemble ComfyUI Wildcards syntax, but file-backed `__name__` wildcards are **not** resolved here. Expand those in an upstream wildcard node. Northmere constraints apply only to Northmere's own named choices.
-
-Hard rules are enforced during seeded selection. Smaller constrained prompts use exact weighted sampling; large prompts use bounded randomized backtracking, which preserves hard rules and favors soft rules locally but does not guarantee exact soft-rule probabilities. Search exhaustion is reported as an error. See `examples/migrated_prompt_v3.txt` for a complete converted template.
-
 ## LoRA Envelope
 
 Schedule a model-only LoRA's strength over denoising. Connect it between **Load Diffusion Model** and **KSampler**.

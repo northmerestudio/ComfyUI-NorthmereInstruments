@@ -10,8 +10,9 @@ Grammar overview:
     @rules / @end               line-oriented constraints and preferences
 
 Rule forms: `day -> night`, `day -> !night`, `day ~> sun @ 3`.
-The solver samples valid *complete selections* with product weights, so hard
-constraints and conditional preference factors are never bypassed.
+Small constrained prompts sample valid complete selections exactly. Large
+templates use bounded driver-first search: hard rules are enforced but soft
+preference probabilities are approximate.
 """
 from __future__ import annotations
 
@@ -386,8 +387,23 @@ def expand_prompt(template: str, seed: int = 0) -> str:
         # sound hard-rule pruning. This is NOT exact weighted sampling.
         # Do not return a rule-invalid selection or silently ignore rules.
         budget = [200_000]
+        hard_sources = {r.source for r in hard}
+        soft_sources = {r.source for r in preferences}
+        targets = {r.target for r in hard} | {r.target for r in preferences}
+
         def possible(nodes):
             return _facts(nodes)
+
+        def choice_priority(node):
+            labels = possible((node,))
+            if labels & soft_sources:
+                return 3
+            if labels & hard_sources:
+                return 2
+            if labels & targets:
+                return 1
+            return 0
+
         def search(nodes, selected):
             budget[0] -= 1
             if budget[0] < 0:
@@ -399,10 +415,14 @@ def expand_prompt(template: str, seed: int = 0) -> str:
                         return None
                     if not rule.positive and rule.target in selected:
                         return None
-            first = next((i for i, n in enumerate(nodes) if isinstance(n, Choice) and _contains_fact((n,))), None)
-            if first is None:
+            candidates = [(i, n) for i, n in enumerate(nodes)
+                          if isinstance(n, Choice) and _contains_fact((n,))]
+            if not candidates:
                 return (nodes, selected) if valid(selected) else None
-            node = nodes[first]
+            # Resolve constraint drivers before their targets. Otherwise a
+            # choice like {nude|dressed} restricts a later scene choice and
+            # badly overrepresents rare scene categories in large templates.
+            first, node = max(candidates, key=lambda item: choice_priority(item[1]))
             remaining = list(node.options)
             while remaining:
                 # Prefer alternatives that satisfy a soft rule at this step.
