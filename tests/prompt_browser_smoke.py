@@ -9,7 +9,7 @@ import shutil
 ROOT = Path(__file__).resolve().parents[1]
 JS = (ROOT/'web/prompt.js').read_text().replace("import { app } from '../../scripts/app.js';", '').replace('import.meta.url', "'file:///tmp/prompt.js'").replace('export function tokens', 'function tokens')
 CSS = (ROOT/'web/prompt.css').read_text()
-PROMPT = '@define hero\ncinematic portrait\n@end\n@pick{day: 3::sunny|night: moonlit} \\{literal\\}\n@if(day){warm light}\n@rules\nday -> !night\nday ~> night @ 3\n@end\n@use(hero)'
+PROMPT = '// A comment about this prompt\n@define hero\ncinematic portrait\n@end\n@pick{day: 3::sunny|night: moonlit} \\{literal\\}\n@if(day){warm light}\n@rules\nday -> !night\nday ~> night @ 3\n@end\n@use(hero)'
 
 
 def main():
@@ -39,6 +39,9 @@ def main():
             assert page.locator('.nmi-prompt-indicator').inner_text() == 'syntax'
             page.evaluate('(v) => node.widget.setValue(v)', PROMPT)
             assert page.evaluate('node.widget.getValue()') == PROMPT
+            assert page.locator('.nmi-prompt-comment').count() == 1
+            assert page.locator('.nmi-prompt-comment').inner_text() == '// A comment about this prompt'
+            assert page.evaluate('getComputedStyle(document.querySelector(".nmi-prompt-comment")).color') != page.evaluate('getComputedStyle(document.querySelector(".nmi-prompt")).color')
             assert page.locator('.nmi-prompt-directive').count() >= 5
             assert page.locator('.nmi-prompt-delimiter').count() >= 4
             assert page.locator('.nmi-prompt-weight').count() == 1

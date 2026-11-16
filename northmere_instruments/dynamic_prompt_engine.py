@@ -8,6 +8,7 @@ Grammar overview:
     @use(name)                   fresh macro expansion
     @define name / @end         line-oriented reusable text
     @rules / @end               line-oriented constraints and preferences
+    // note                      full-line comment (leading spaces allowed)
 
 Rule forms: `day -> night`, `day -> !night`, `day ~> sun @ 3`.
 Small constrained prompts sample valid complete selections exactly. Large
@@ -71,6 +72,12 @@ class Preference:
     source: str
     target: str
     factor: float
+
+
+def _strip_comments(template: str) -> str:
+    """Ignore // comment lines without interpreting slashes in prompt text or URLs."""
+    return ''.join(line for line in template.splitlines(keepends=True)
+                   if not line.lstrip(' \t').startswith('//'))
 
 
 def _extract(template: str) -> tuple[str, dict[str, str], str]:
@@ -355,7 +362,7 @@ def expand_prompt(template: str, seed: int = 0) -> str:
         raise PromptSyntaxError('Prompt must be a string')
     if '[[' in template or ']]' in template:
         raise PromptSyntaxError('Legacy [[...]] syntax is removed; use @pick, @if, @define and @rules')
-    source, definitions, rules_text = _extract(template)
+    source, definitions, rules_text = _extract(_strip_comments(template))
     source = _resolve(source, definitions)
     if re.search(r'(?<!\\)__(?:[A-Za-z0-9_./-]+)__', source):
         raise PromptSyntaxError('File-backed __wildcards__ are not supported; expand them upstream in a wildcard node')

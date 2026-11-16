@@ -10,11 +10,13 @@ Expands seeded `{a|b}` choices into a `STRING`. Supported syntax:
 - **Named choices:** `@pick{day: sunny|night: moonlit}` labels the selected alternative without putting its label in the output. Labels are Boolean facts for the current expansion; the same label may occur in multiple named choices. One alternative may declare several facts: `@pick{compact, low_ceiling: small room|_: ordinary room}`. Use `_:` when an alternative has **no label**; `_` never becomes a fact.
 - **Rules:** Put an `@rules` ... `@end` block on its own lines. `day -> sun` requires `sun` when `day` is selected; `day -> !night` excludes `night`; `day ~> sun @ 3` multiplies the weight of complete selections containing both labels by 3. Rule labels must be declared in named choices.
 - **Reuse:** Define a standalone `@define name` ... `@end` block, then insert it with `@use(name)`. Each use expands independently.
+- **Comments:** Write `//` at the start of a line (indentation is fine). That entire line is ignored, including inside definitions and rules. Inline `//` and URLs remain literal prompt text.
 - **Conditional text:** `@if(day){bright light}` appears only if `day` was selected. It can contain ordinary nested choices, but not new named choices.
 
 Example:
 
 ```text
+// Choose a setting and lighting
 @pick{day: sunny landscape|night: moonlit landscape},
 @pick{soft: soft light|flash: studio flash}.
 @if(day){ Warm {golden|gentle} colors.}

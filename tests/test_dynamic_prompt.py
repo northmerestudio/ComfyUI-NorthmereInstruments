@@ -185,3 +185,21 @@ def test_large_template_driver_first_selection_preserves_scene_frequency():
     assert 0.82 < regular / len(results) < 0.96
     assert all(('dressed special' in result) or ('nude main' in result)
                for result in results)
+
+
+def test_full_line_comments_in_every_context():
+    baseline = ('@define mood\n{calm|bright}\n@end\n'
+                'Scene: @use(mood) @pick{day:day|night:night}\n'
+                '@rules\nday -> !night\n@end')
+    annotated = ('// Definition\n@define mood\n  // alternatives\n{calm|bright}\n@end\n'
+                 '// Main text\nScene: @use(mood) @pick{day:day|night:night}\n'
+                 '// Constraints\n@rules\n // rule\nday -> !night\n@end')
+    for seed in range(100):
+        assert expand_prompt(annotated, seed) == expand_prompt(baseline, seed)
+
+
+def test_double_slashes_in_prompt_urls_and_inline_text_are_literal():
+    assert expand_prompt('https://example.com // not a comment', 1) == 'https://example.com // not a comment'
+    assert expand_prompt('  // ignored\nvisible', 1) == 'visible'
+    assert expand_prompt('abc//def', 1) == 'abc//def'
+    assert expand_prompt('a\n\t// ignored\nb', 1) == 'a\nb'

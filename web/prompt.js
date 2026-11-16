@@ -20,6 +20,11 @@ export function tokens(text) {
     else out.push({ kind, value });
   };
   while (i < text.length) {
+    // Comment syntax applies only at the start of a physical line.
+    if (i === 0 || text[i - 1] === '\n') {
+      const line = text.slice(i).match(/^[ \t]*\/\/[^\r\n]*/);
+      if (line) { emit('comment', line[0]); i += line[0].length; continue; }
+    }
     const rest = text.slice(i);
     if (rest[0] === '\\' && rest.length > 1) {
       emit('escape', rest.slice(0, 2)); i += 2; continue;
