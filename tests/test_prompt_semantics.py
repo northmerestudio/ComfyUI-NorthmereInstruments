@@ -113,3 +113,23 @@ def test_rendering_keeps_literal_whitespace() -> None:
     assert {expand_prompt(source, seed) for seed in range(20)} == {
         'A  left\nB', 'A  right\nB',
     }
+
+
+@pytest.mark.parametrize('prefix', ['', '\n', '\n\n', '   ', '\n  ', '\ufeff', '\ufeff\n  '])
+def test_header_accepts_paste_whitespace(prefix: str) -> None:
+    source = prefix + '---  \nchoose look = {natural | glossy}\nlet model = {woman | model}\n---\n$model'
+    assert {expand_prompt(source, seed) for seed in range(20)} == {'woman', 'model'}
+
+
+def test_header_accepts_whitespace_with_windows_line_endings() -> None:
+    source = '\r\n  ---  \r\nchoose look = {natural | glossy}\r\n---\r\n?look.natural{N}?look.glossy{G}'
+    assert {expand_prompt(source, seed) for seed in range(20)} == {'N', 'G'}
+
+
+def test_no_header_preserves_leading_whitespace() -> None:
+    assert expand_prompt('\n  portrait', 0) == '\n  portrait'
+
+
+def test_unclosed_indented_header_still_rejected() -> None:
+    with pytest.raises(PromptLanguageError, match='unclosed header'):
+        expand_prompt('\n ---\nlet model = {woman | model}\n$model')

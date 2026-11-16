@@ -245,13 +245,16 @@ def parse(source: str) -> Program:
     requirements: list[tuple[Expression, Expression]] = []
     preferences: list[tuple[Expression, Fraction]] = []
     body = source
-    if source.startswith(('---\n', '---\r\n')):
-        opening_length = 5 if source.startswith('---\r\n') else 4
-        match = re.search(r'^---[ \t]*\r?$', source[opening_length:], re.M)
+    # Tolerate paste-related whitespace/BOM before a header, but do not
+    # change whitespace in ordinary prompts that have no header.
+    opening = re.match(r'\A\ufeff?[ \t\r\n]*---[ \t]*\r?\n', source)
+    if opening:
+        header_start = opening.end()
+        match = re.search(r'^---[ \t]*\r?$', source[header_start:], re.M)
         if not match:
             raise LanguageError('unclosed header')
-        header = source[opening_length:opening_length + match.start()]
-        body = source[opening_length + match.end():]
+        header = source[header_start:header_start + match.start()]
+        body = source[header_start + match.end():]
         body = body.removeprefix('\r\n') if body.startswith('\r\n') else body.removeprefix('\n')
         statements = []
         cur = ''
