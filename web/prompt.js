@@ -1,54 +1,64 @@
 import { app } from '../../scripts/app.js';
 
-// Exactly the same V3 custom widget integration as the working LoRA curve.
+// Exactly the same custom widget integration and DOM-backed editor.
 // The backend still receives an unmodified STRING called "template".
 const stylesheet = document.createElement('link');
 stylesheet.rel = 'stylesheet';
 stylesheet.href = new URL('./prompt.css', import.meta.url).href;
 document.head.append(stylesheet);
 
-const DIRECTIVE = /^@(pick|if|use|define|rules|end)\b/;
-const IDENT = /^[A-Za-z][\w.-]*/;
-const NUMBER = /^(?:\d+(?:\.\d*)?|\.\d+)/;
+const IDENT = /^[A-Za-z][A-Za-z0-9_]*(?:\.[A-Za-z][A-Za-z0-9_]*)*/;
+const KEYWORD = /^(choose|let|require|prefer)\b/;
+const WEIGHT = /^@(?:\d+(?:\.\d+)?)/;
 
-// Escaping is explicit: never interpolate user text into HTML.
-export function tokens(text) {
+// Highlighting is deliberately forgiving. The Python parser is authoritative.
+// Return alternating tokens with the same total text to avoid caret/mirror drift.
+export function tokens(source) {
   const out = [];
   let i = 0;
+  let header = source.startsWith('---\n');
   const emit = (kind, value) => {
     if (out.length && out[out.length - 1].kind === kind) out[out.length - 1].value += value;
     else out.push({ kind, value });
   };
-  while (i < text.length) {
-    // Comment syntax applies only at the start of a physical line.
-    if (i === 0 || text[i - 1] === '\n') {
-      const line = text.slice(i).match(/^[ \t]*\/\/[^\r\n]*/);
-      if (line) { emit('comment', line[0]); i += line[0].length; continue; }
+  while (i < source.length) {
+    const startLine = i === 0 || source[i - 1] === '\n';
+    const rest = source.slice(i);
+    if (startLine && /^---(?:\r?\n|$)/.test(rest)) {
+      const marker = rest.startsWith('---\r\n') ? '---\r\n' : rest.startsWith('---\n') ? '---\n' : '---';
+      emit('directive', marker); i += marker.length;
+      if (i !== marker.length) header = false;
+      continue;
     }
-    const rest = text.slice(i);
+    if (startLine) {
+      const comment = rest.match(header ? /^[ \t]*#[^\r\n]*/ : /^[ \t]*\/\/[^\r\n]*/);
+      if (comment) { emit('comment', comment[0]); i += comment[0].length; continue; }
+    }
     if (rest[0] === '\\' && rest.length > 1) {
       emit('escape', rest.slice(0, 2)); i += 2; continue;
     }
-    const directive = rest.match(DIRECTIVE);
-    if (directive) {
-      emit('directive', directive[0]); i += directive[0].length; continue;
+    if (header && (startLine || /^[ \t]/.test(source[i - 1] ?? ''))) {
+      const keyword = rest.match(KEYWORD);
+      if (keyword) { emit('directive', keyword[0]); i += keyword[0].length; continue; }
     }
-    const weight = rest.match(NUMBER);
-    if (weight && /^\s*::/.test(rest.slice(weight[0].length))) {
-      const whole = rest.match(/^(?:\d+(?:\.\d*)?|\.\d+)\s*::/)[0];
-      emit('weight', whole); i += whole.length; continue;
-    }
-    if (rest.startsWith('->') || rest.startsWith('~>')) {
+    if (rest.startsWith('=>') || rest.startsWith('->')) {
       emit('operator', rest.slice(0, 2)); i += 2; continue;
     }
-    if ('{}|()'.includes(rest[0])) {
+    if (rest[0] === '$' || rest[0] === '?') {
+      const name = rest.slice(1).match(IDENT);
+      if (name && (rest[0] === '$' || rest[1 + name[0].length] === '{')) {
+        emit('directive', rest[0] + name[0]); i += 1 + name[0].length; continue;
+      }
+    }
+    const weight = rest.match(WEIGHT);
+    if (weight && i > 0 && /\s/.test(source[i - 1])) {
+      emit('weight', weight[0]); i += weight[0].length; continue;
+    }
+    if ('{}|&!()'.includes(rest[0])) {
       emit('delimiter', rest[0]); i++; continue;
     }
-    // Label definitions in @pick and fact names in rules are subtly distinguished.
-    const identifier = rest.match(IDENT);
-    if (identifier && /^[ \t]*(?:,\s*[A-Za-z][\w.-]*\s*)*:/.test(rest.slice(identifier[0].length))) {
-      emit('label', identifier[0]); i += identifier[0].length; continue;
-    }
+    const tag = rest.match(/^([A-Za-z][A-Za-z0-9_]*(?:\s*,\s*[A-Za-z][A-Za-z0-9_]*)*|_)(?=\s*=>)/);
+    if (tag) { emit('label', tag[0]); i += tag[0].length; continue; }
     emit('plain', rest[0]); i++;
   }
   return out;
@@ -83,7 +93,7 @@ function createPromptEditor(node, inputName) {
   textarea.autocapitalize = 'off';
   textarea.autocomplete = 'off';
   textarea.setAttribute('aria-label', 'Northmere prompt template');
-  textarea.placeholder = 'Write a prompt…  {red|blue}  @pick{day: sunny|night: moonlit}';
+  textarea.placeholder = 'Write a prompt…  {red | blue}  {day => sunny | night => moonlit}';
   surface.append(mirror, textarea);
   root.append(header, surface);
 

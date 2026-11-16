@@ -4,7 +4,7 @@ import sys
 from types import ModuleType, SimpleNamespace
 
 
-def test_dynamic_prompt_v3_schema_and_execution(monkeypatch):
+def test_dynamic_prompt_schema_and_execution(monkeypatch):
     class Input:
         def __init__(self, name=None, **kwargs):
             self.name, self.kwargs = name, kwargs
@@ -31,5 +31,5 @@ def test_dynamic_prompt_v3_schema_and_execution(monkeypatch):
     assert schema.inputs[0].socketless is True
     assert schema.inputs[0].kwargs['multiline'] is True
     assert schema.outputs[0].kwargs['display_name'] == 'prompt'
-    result = dynamic_prompt.DynamicPromptNode.execute('@pick{day:sun|night:moon}', seed=4)
+    result = dynamic_prompt.DynamicPromptNode.execute('{day => sun | night => moon}', seed=4)
     assert result.value in ('sun', 'moon')

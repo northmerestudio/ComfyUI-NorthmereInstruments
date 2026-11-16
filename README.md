@@ -4,29 +4,28 @@ ComfyUI custom nodes by [Northmere Studio](https://github.com/NorthmereStudio).
 
 ## Dynamic Prompt
 
-Expands seeded `{a|b}` choices into a `STRING`. Supported syntax:
+Expands seeded choices into a `STRING`. Supported syntax:
 
-- **Choices:** `{red|blue}`; nesting works too: `{small|{medium|large}}`. Use `{3::red|1::blue}` for relative weights.
-- **Named choices:** `@pick{day: sunny|night: moonlit}` labels the selected alternative without putting its label in the output. Labels are Boolean facts for the current expansion; the same label may occur in multiple named choices. One alternative may declare several facts: `@pick{compact, low_ceiling: small room|_: ordinary room}`. Use `_:` when an alternative has **no label**; `_` never becomes a fact.
-- **Rules:** Put an `@rules` ... `@end` block on its own lines. `day -> sun` requires `sun` when `day` is selected; `day -> !night` excludes `night`; `day ~> sun @ 3` multiplies the weight of complete selections containing both labels by 3. Rule labels must be declared in named choices.
-- **Reuse:** Define a standalone `@define name` ... `@end` block, then insert it with `@use(name)`. Each use expands independently.
-- **Comments:** Write `//` at the start of a line (indentation is fine). That entire line is ignored, including inside definitions and rules. Inline `//` and URLs remain literal prompt text.
-- **Conditional text:** `@if(day){bright light}` appears only if `day` was selected. It can contain ordinary nested choices, but not new named choices.
+- **Choices:** `{red | blue}` and nested choices such as `{small | {medium | large}}`. Use `{red @3 | blue @1}` for relative weights.
+- **Tagged choices:** `{day => sunny | night => moonlit}` asserts facts without printing their names. A branch can assert several facts: `{compact, low_ceiling => small room | _ => ordinary room}`. `_` asserts none.
+- **Conditions:** `?day{warm light}` outputs text only when a fact is present. `?outfit.casual{shirt}` tests a shared decision.
+- **Reuse:** Declare `let gaze = {left | right}` in a `---` header; `$gaze` expands independently each time. Dotted definition names are supported.
+- **Shared decisions:** `choose outfit = {casual | formal}` selects once for the entire generation; refer to `?outfit.casual{...}` or `?outfit.formal{...}`.
+- **Constraints:** `require day -> !flash` disallows conflicting choices; `prefer window & soft * 4` increases relative likelihood. Declare these in the header.
+- **Comments:** Whole body lines starting with `//` and whole header lines starting with `#` are ignored. Inline comments are not recognized.
 
 Example:
 
 ```text
-// Choose a setting and lighting
-@pick{day: sunny landscape|night: moonlit landscape},
-@pick{soft: soft light|flash: studio flash}.
-@if(day){ Warm {golden|gentle} colors.}
-
-@rules
-  day -> !flash
-@end
+---
+choose outfit = {casual | formal}
+require day -> !flash
+prefer window & soft * 4
+---
+// Scene
+Portrait ?outfit.casual{in a shirt}?outfit.formal{in a jacket}.
+{window => by a window | day => outside}, {soft => soft light | flash => flash}.
 ```
-
-Structural whitespace around choices, labels, directives, and rule operators is tolerated. Literal prompt whitespace is generally preserved. Escape syntax characters with a backslash, such as `\{` and `\|`.
 
 ## LoRA Envelope
 

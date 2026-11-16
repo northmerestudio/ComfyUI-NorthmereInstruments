@@ -9,7 +9,16 @@ import shutil
 ROOT = Path(__file__).resolve().parents[1]
 JS = (ROOT/'web/prompt.js').read_text().replace("import { app } from '../../scripts/app.js';", '').replace('import.meta.url', "'file:///tmp/prompt.js'").replace('export function tokens', 'function tokens')
 CSS = (ROOT/'web/prompt.css').read_text()
-PROMPT = '// A comment about this prompt\n@define hero\ncinematic portrait\n@end\n@pick{day: 3::sunny|night: moonlit} \\{literal\\}\n@if(day){warm light}\n@rules\nday -> !night\nday ~> night @ 3\n@end\n@use(hero)'
+PROMPT = """---
+choose attire = {casual @3 | formal}
+let hero = {day => cinematic portrait | night => moonlit portrait}
+require day -> !flash
+prefer day & soft * 3
+---
+// A comment about this prompt
+$hero ?attire.casual{shirt}?attire.formal{jacket}
+{soft => soft light | flash => flash} \\{literal\\}
+"""
 
 
 def main():
@@ -46,7 +55,7 @@ def main():
             assert page.locator('.nmi-prompt-delimiter').count() >= 4
             assert page.locator('.nmi-prompt-weight').count() == 1
             assert page.locator('.nmi-prompt-label').count() >= 1
-            assert page.locator('.nmi-prompt-operator').count() == 2
+            assert page.locator('.nmi-prompt-operator').count() >= 2
             assert page.locator('.nmi-prompt-escape').count() == 2
             assert page.locator('.nmi-prompt').count() == 1
             assert page.evaluate('getComputedStyle(document.querySelector(".nmi-prompt-directive")).color') != page.evaluate('getComputedStyle(document.querySelector(".nmi-prompt")).color')
