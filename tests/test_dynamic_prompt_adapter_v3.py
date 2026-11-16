@@ -27,6 +27,9 @@ def test_dynamic_prompt_v3_schema_and_execution(monkeypatch):
     schema = dynamic_prompt.DynamicPromptNode.define_schema()
     assert schema.node_id == 'NorthmereInstruments.DynamicPrompt'
     assert [x.name for x in schema.inputs] == ['template', 'seed']
+    assert schema.inputs[0].widget_type == 'NORTHMERE_INSTRUMENTS_PROMPT'
+    assert schema.inputs[0].socketless is True
+    assert schema.inputs[0].kwargs['multiline'] is True
     assert schema.outputs[0].kwargs['display_name'] == 'prompt'
     result = dynamic_prompt.DynamicPromptNode.execute('@pick{day:sun|night:moon}', seed=4)
     assert result.value in ('sun', 'moon')

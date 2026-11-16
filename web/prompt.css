@@ -1,0 +1,52 @@
+/* Scoped to one V3 DOM widget; no global textarea or ComfyUI theme overrides. */
+.nmi-prompt {
+  --nmi-ink: #e6e6e6;
+  --nmi-surface: #292b30;
+  --nmi-directive: #83b7ff;
+  --nmi-delimiter: #d7a0f5;
+  --nmi-weight: #f4bd78;
+  --nmi-label: #8ed6b4;
+  --nmi-operator: #efa8a8;
+  --nmi-escape: #b4b9c6;
+  display: flex; flex-direction: column; width: 100%; height: 100%; min-height: 230px;
+  color: var(--nmi-ink); font-family: inherit; box-sizing: border-box;
+}
+@media (prefers-color-scheme: light) {
+  .nmi-prompt { --nmi-surface: #f8fafc; --nmi-ink: #242930; --nmi-directive: #225eb2; --nmi-delimiter: #7e399b;
+    --nmi-weight: #97520e; --nmi-label: #146e50; --nmi-operator: #af3c50; --nmi-escape: #676c77; }
+}
+/* ComfyUI theme classes override OS preference when the app forces a theme. */
+:where(.light-theme, .comfy-theme-light, [data-theme='light']) .nmi-prompt {
+  --nmi-surface: #f8fafc; --nmi-ink: #242930; --nmi-directive: #225eb2; --nmi-delimiter: #7e399b;
+  --nmi-weight: #97520e; --nmi-label: #146e50; --nmi-operator: #af3c50; --nmi-escape: #676c77;
+}
+:where(.dark-theme, .comfy-theme-dark, [data-theme='dark']) .nmi-prompt {
+  --nmi-surface: #292b30; --nmi-ink: #e6e6e6; --nmi-directive: #83b7ff; --nmi-delimiter: #d7a0f5;
+  --nmi-weight: #f4bd78; --nmi-label: #8ed6b4; --nmi-operator: #efa8a8; --nmi-escape: #b4b9c6;
+}
+.nmi-prompt-header { display: flex; justify-content: space-between; align-items: center;
+  padding: 3px 5px 7px; font-size: 11px; opacity: .85; }
+.nmi-prompt-indicator { font: inherit; letter-spacing: .04em; opacity: .7; }
+.nmi-prompt-surface { position: relative; flex: 1; min-height: 190px; overflow: hidden;
+  border: 1px solid var(--border-color, #7777); border-radius: 6px;
+  background: var(--nmi-surface); }
+.nmi-prompt-mirror { position: absolute; inset: 0; overflow: hidden; pointer-events: none; }
+.nmi-prompt-highlight, .nmi-prompt-input {
+  box-sizing: border-box; margin: 0; padding: 10px 12px;
+  width: 100%; font: 12.5px/1.5 ui-monospace, SFMono-Regular, Consolas, 'Liberation Mono', monospace;
+  letter-spacing: 0; tab-size: 4; white-space: pre-wrap; overflow-wrap: break-word;
+}
+.nmi-prompt-highlight { position: absolute; inset: 0; width: 100%; min-height: 100%; color: var(--nmi-ink); }
+.nmi-prompt-input { position: absolute; inset: 0; height: 100%; resize: none;
+  background: transparent !important; border: 0; outline: none;
+  color: transparent !important; -webkit-text-fill-color: transparent; caret-color: var(--nmi-ink);
+  overflow: auto; scrollbar-width: thin; }
+.nmi-prompt-input::placeholder { color: var(--nmi-ink); -webkit-text-fill-color: var(--nmi-ink); opacity: .5; }
+.nmi-prompt-input::selection { background: rgba(119,151,215,.35); }
+.nmi-prompt-surface:focus-within { outline: 1px solid var(--nmi-directive); outline-offset: -1px; }
+.nmi-prompt-directive { color: var(--nmi-directive); font-weight: 600; }
+.nmi-prompt-delimiter { color: var(--nmi-delimiter); }
+.nmi-prompt-weight { color: var(--nmi-weight); }
+.nmi-prompt-label { color: var(--nmi-label); }
+.nmi-prompt-operator { color: var(--nmi-operator); }
+.nmi-prompt-escape { color: var(--nmi-escape); }

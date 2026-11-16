@@ -1,0 +1,69 @@
+"""Browser test: exercise the SAME getCustomWidgets/addDOMWidget contract used by curve.js.
+
+This is an isolated ComfyUI-compatible host harness, not a full running ComfyUI instance.
+"""
+from pathlib import Path
+from playwright.sync_api import sync_playwright
+import shutil
+
+ROOT = Path(__file__).resolve().parents[1]
+JS = (ROOT/'web/prompt.js').read_text().replace("import { app } from '../../scripts/app.js';", '').replace('import.meta.url', "'file:///tmp/prompt.js'").replace('export function tokens', 'function tokens')
+CSS = (ROOT/'web/prompt.css').read_text()
+PROMPT = '@define hero\ncinematic portrait\n@end\n@pick{day: 3::sunny|night: moonlit} \\{literal\\}\n@if(day){warm light}\n@rules\nday -> !night\nday ~> night @ 3\n@end\n@use(hero)'
+
+
+def main():
+    html = f'''<!doctype html><html><head><meta charset="utf-8"><style>
+    body {{margin:30px;background:#252525;color:#e6e6e6;}}
+    #mount {{width:450px;height:280px}}
+    {CSS}
+    </style></head><body><div id="mount"></div><script>
+    window.app = {{registerExtension(ext) {{ window.ext = ext; }} }};
+    {JS}
+    window.node = {{graph:{{change() {{window.changed = (window.changed || 0) + 1;}}}},
+       setDirtyCanvas() {{}}, addDOMWidget(name, type, root, options) {{
+         document.getElementById('mount').append(root);
+         this.widget = {{name,type,...options, callback(){{}}}};return this.widget;
+       }} }};
+    window.ext.getCustomWidgets().NORTHMERE_INSTRUMENTS_PROMPT(node,'template',['STRING',{{}}]);
+    </script></body></html>'''
+    with sync_playwright() as pw:
+        browser = pw.chromium.launch(headless=True, executable_path=shutil.which('chromium'), args=['--no-sandbox'])
+        for theme in ('dark', 'light'):
+            page = browser.new_page(viewport={'width':850,'height':550}, color_scheme=theme)
+            errors=[]
+            page.on('pageerror', lambda e: errors.append(str(e)))
+            page.set_content(html)
+            page.evaluate("document.body.classList.add('comfy-theme-' + arguments[0])".replace('arguments[0]', f"'{theme}'"))
+            assert page.locator('.nmi-prompt-indicator').inner_text() == 'syntax'
+            page.evaluate('(v) => node.widget.setValue(v)', PROMPT)
+            assert page.evaluate('node.widget.getValue()') == PROMPT
+            assert page.locator('.nmi-prompt-directive').count() >= 5
+            assert page.locator('.nmi-prompt-delimiter').count() >= 4
+            assert page.locator('.nmi-prompt-weight').count() == 1
+            assert page.locator('.nmi-prompt-label').count() >= 1
+            assert page.locator('.nmi-prompt-operator').count() == 2
+            assert page.locator('.nmi-prompt-escape').count() == 2
+            assert page.locator('.nmi-prompt').count() == 1
+            assert page.evaluate('getComputedStyle(document.querySelector(".nmi-prompt-directive")).color') != page.evaluate('getComputedStyle(document.querySelector(".nmi-prompt")).color')
+            page.locator('textarea').fill(PROMPT + '\n<script>alert(1)</script>')
+            assert '<script>alert(1)</script>' in page.evaluate('node.widget.getValue()')
+            assert page.locator('.nmi-prompt-highlight script').count() == 0
+            assert page.evaluate('window.changed') >= 1
+            page.locator('textarea').press('ControlOrMeta+z')
+            page.evaluate('(v) => node.widget.setValue(v)', '\n'.join([PROMPT]*20))
+            page.locator('textarea').evaluate('(e) => {e.scrollTop=100;e.dispatchEvent(new Event("scroll"));}')
+            assert '-100px' in page.locator('.nmi-prompt-highlight').evaluate('(e) => e.style.transform')
+            # Basic visual parity: mirror and textarea have identical font and padding.
+            assert page.evaluate('''() => {
+                const a=getComputedStyle(document.querySelector('textarea'));
+                const b=getComputedStyle(document.querySelector('.nmi-prompt-highlight'));
+                return a.font===b.font && a.padding===b.padding && a.width===b.width;
+            }''')
+            page.evaluate('(v) => node.widget.setValue(v)', PROMPT)
+            assert not errors, errors
+            page.close()
+        browser.close()
+    print('PASS: widget registration, DOM rendering, themes, editing, restore, tokens, escaping, scrolling')
+
+if __name__ == '__main__': main()

@@ -8,6 +8,19 @@ from .dynamic_prompt_engine import expand_prompt
 
 CATEGORY = 'Northmere Instruments/Prompt'
 
+
+class PromptTemplateInput(io.String.Input):
+    """Native STRING data with the same custom-widget contract as LoRA Envelope."""
+
+    def __init__(self) -> None:
+        super().__init__(
+            'template', multiline=True, default='',
+            tooltip='Use {one|two}, {3::one|two}, @pick{day: sunny|night: moonlit}, '
+                    '@if(day){warm light}, @define/@use and @rules/@end.',
+        )
+        self.widget_type = 'NORTHMERE_INSTRUMENTS_PROMPT'
+        self.socketless = True
+
 class DynamicPromptNode(io.ComfyNode):
     @classmethod
     def define_schema(cls) -> io.Schema:
@@ -18,11 +31,7 @@ class DynamicPromptNode(io.ComfyNode):
             description='Seeded choices, labelled @pick alternatives, definitions, conditions and rule-aware sampling.',
             search_aliases=['northmere', 'dynamic prompt', 'seeded prompt', 'prompt rules'],
             inputs=[
-                io.String.Input(
-                    'template', multiline=True, default='',
-                    tooltip='Use {one|two}, {3::one|two}, @pick{day: sunny|night: moonlit}, '
-                    '@if(day){warm light}, @define/@use and @rules/@end.',
-                ),
+                PromptTemplateInput(),
                 io.Int.Input('seed', default=0, min=0, max=0xFFFFFFFFFFFFFFFF,
                              control_after_generate=True,
                              tooltip='Deterministic expansion seed; independent of KSampler.'),
