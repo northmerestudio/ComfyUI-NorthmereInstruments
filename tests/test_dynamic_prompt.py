@@ -73,10 +73,10 @@ def test_no_legacy_and_no_implicit_file_wildcards():
 
 @pytest.mark.parametrize('bad, error', [
     ('{a}', 'at least two'),
-    ('{a|}', 'Empty'),
+    ('{a|}', None),
     ('{a|b', 'Unclosed'),
     ('{a|b}}', 'Unexpected'),
-    ('@pick{a: x|a: y}', 'Duplicate alternative'),
+    ('@pick{a: x|a: y}', None),
     ('@pick{x|y}', 'Expected named alternative'),
     ('@pick{a: x|b: y} @if(missing){hello}', 'Unknown label'),
     ('@if(a){@pick{a:a|b:b}}', 'Labels inside'),
@@ -90,7 +90,7 @@ def test_no_legacy_and_no_implicit_file_wildcards():
 ])
 def test_errors(bad, error):
     if error is None:
-        assert expand_prompt(bad)
+        expand_prompt(bad)
     else:
         with pytest.raises(PromptSyntaxError, match=error):
             expand_prompt(bad)
@@ -120,3 +120,65 @@ def test_independent_unlabelled_choices_do_not_blow_up_constraint_space():
     t = '@pick{day:day|night:night} ' + ' '.join('{red|blue}' for _ in range(25))
     t += '\n@rules\nday -> !night\n@end'
     assert len(expand_prompt(t, 0).split()) == 26
+
+
+def test_multiple_facts_per_alternative():
+    prompt = '@pick{compact, low: small|spacious: large} @pick{high: high|level: level}\n@rules\nlow -> !high\n@end'
+    for seed in range(30):
+        output = expand_prompt(prompt, seed)
+        assert not ('small' in output and 'high' in output)
+
+
+def test_repeated_fact_in_alternatives():
+    prompt = '@pick{glasses: blue frames|glasses: red frames|none: no glasses}'
+    assert {expand_prompt(prompt, s) for s in range(40)} == {'blue frames', 'red frames', 'no glasses'}
+
+
+def test_empty_option_for_optional_text():
+    assert {expand_prompt('a{| b}', s) for s in range(40)} == {'a', 'ab'}
+
+
+def test_migrated_real_template_expands():
+    from pathlib import Path
+    template = (Path(__file__).resolve().parents[1] / 'examples' / 'migrated_prompt_v3.txt').read_text()
+    for seed in range(12):
+        result = expand_prompt(template, seed)
+        assert result.startswith('Natural photograph')
+        assert '[[' not in result
+        assert '@pick{' not in result
+        assert '@use(' not in result
+        assert '@if(' not in result
+        assert len(result) > 300
+        assert result == expand_prompt(template, seed)
+
+
+def test_anonymous_named_choice_branch_has_no_label():
+    template = '@pick{day: sunny|_: overcast} @pick{flash: flash|_: natural}'
+    template += '\n@rules\nday -> !flash\n@end'
+    assert {expand_prompt(template, seed) for seed in range(100)} == {
+        'sunny natural', 'overcast flash', 'overcast natural',
+    }
+
+
+def test_anonymous_branch_can_be_empty_or_follow_tagged_alternatives():
+    prompt = 'portrait@pick{glasses: , with glasses|glasses: , with frames|_: }.'
+    assert {expand_prompt(prompt, seed) for seed in range(90)} == {
+        'portrait, with glasses.', 'portrait, with frames.', 'portrait.',
+    }
+
+
+def test_anonymous_sentinel_is_not_a_rule_label():
+    with pytest.raises(PromptSyntaxError, match='Invalid rule'):
+        expand_prompt('@pick{a: hello|_: world}\n@rules\na -> _\n@end')
+
+
+def test_large_search_applies_soft_preferences_locally():
+    # 2**19 labeled states exceeds the exact solver cap, activating fallback.
+    template = '@pick{source: src|other: oth} @pick{target: yes|absent: no} '
+    template += ' '.join(f'@pick{{d{i}: X|e{i}: Y}}' for i in range(17))
+    template += '\n@rules\nsource ~> target @ 20\n@end'
+    results = [expand_prompt(template, seed) for seed in range(300)]
+    source_results = [r for r in results if r.startswith('src ')]
+    assert len(source_results) > 70
+    assert sum('src yes ' in r for r in source_results) / len(source_results) > 0.82
+    assert results == [expand_prompt(template, seed) for seed in range(300)]

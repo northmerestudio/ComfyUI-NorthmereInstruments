@@ -3,7 +3,7 @@
 Grammar overview:
     {red|blue}                   unlabelled choice
     {3::red|1::blue}             positive relative alternative weights
-    @pick{day: sunny|night: moonlit}  labelled alternatives (facts)
+    @pick{day: sunny|_: neutral|night, outdoor: moonlit}  facts; _ has none
     @if(day){bright light}       conditional rendering (no new facts)
     @use(name)                   fresh macro expansion
     @define name / @end         line-oriented reusable text
@@ -34,7 +34,7 @@ USE = re.compile(r'@use\s*\(\s*(' + NAME + r')\s*\)')
 HARD = re.compile(r'(' + NAME + r')\s*->\s*(!?)\s*(' + NAME + r')\Z')
 SOFT = re.compile(r'(' + NAME + r')\s*~>\s*(' + NAME + r')\s*@\s*([0-9]+(?:\.[0-9]*)?|\.[0-9]+)(?:\s*)\Z')
 WEIGHT = re.compile(r'\s*([0-9]+(?:\.[0-9]*)?|\.[0-9]+)\s*::')
-LABEL = re.compile(r'\s*(' + NAME + r')\s*:')
+LABEL = re.compile(r'\s*(' + NAME + r'(?:\s*,\s*' + NAME + r')*|_)\s*:')
 ESCAPE = frozenset('\\{}|@:')
 
 class PromptSyntaxError(ValueError):
@@ -52,7 +52,7 @@ class Choice:
 class Option:
     nodes: tuple[object, ...]
     weight: float = 1.0
-    fact: str | None = None
+    facts: tuple[str, ...] = ()
 
 @dataclass(frozen=True)
 class If:
@@ -186,11 +186,13 @@ class Parser:
     def choice(self, depth: int, labelled: bool) -> Choice:
         options = []
         while True:
-            fact = None
+            facts = ()
             if labelled:
                 m = LABEL.match(self.text, self.index)
                 if m is None: raise PromptSyntaxError(f'Expected named alternative in @pick near offset {self.index}')
-                fact = m.group(1)
+                facts = () if m.group(1) == '_' else tuple(x.strip() for x in m.group(1).split(','))
+                if len(facts) != len(set(facts)):
+                    raise PromptSyntaxError('Duplicate labels in alternative')
                 self.index = m.end()
             m = WEIGHT.match(self.text, self.index)
             weight = float(m.group(1)) if m else 1.0
@@ -199,13 +201,10 @@ class Parser:
                 raise PromptSyntaxError('Choice weight must be positive and finite')
             body, stop = self.sequence(depth, 'pick' if labelled else 'choice')
             body = _trim(body)
-            if not body: raise PromptSyntaxError('Empty alternatives are not allowed')
-            options.append(Option(body, weight, fact))
+            options.append(Option(body, weight, facts))
             if stop == '}': break
             if stop is None: raise PromptSyntaxError('Unclosed choice')
         if len(options) < 2: raise PromptSyntaxError('Choices require at least two alternatives')
-        if labelled and len({o.fact for o in options}) != len(options):
-            raise PromptSyntaxError('Duplicate alternative labels in @pick')
         self.node_count += 1
         if self.node_count > MAX_NODES: raise PromptSyntaxError('Too many choices')
         return Choice(tuple(options))
@@ -223,7 +222,7 @@ def _facts(nodes: tuple[object, ...]) -> set[str]:
     for node in nodes:
         if isinstance(node, Choice):
             for opt in node.options:
-                if opt.fact: result.add(opt.fact)
+                result.update(opt.facts)
                 result.update(_facts(opt.nodes))
         if isinstance(node, If):
             if _facts(node.nodes):
@@ -269,7 +268,7 @@ def _validate_conditions(nodes: tuple[object, ...], facts: set[str]) -> None:
 def _contains_fact(nodes: tuple[object, ...]) -> bool:
     for node in nodes:
         if isinstance(node, Choice):
-            if any(option.fact or _contains_fact(option.nodes) for option in node.options):
+            if any(option.facts or _contains_fact(option.nodes) for option in node.options):
                 return True
         elif isinstance(node, If) and _contains_fact(node.nodes):
             return True
@@ -324,7 +323,7 @@ def expand_prompt(template: str, seed: int = 0) -> str:
                     branch, branch_facts = choose(option.nodes)
                     output.extend(branch)
                     selected.update(branch_facts)
-                    if option.fact: selected.add(option.fact)
+                    selected.update(option.facts)
                 else: output.append(n)
             return tuple(output), selected
         resolved, selected = choose(tree)
@@ -345,7 +344,7 @@ def expand_prompt(template: str, seed: int = 0) -> str:
             node = nodes[first]
             option_total = sum(o.weight for o in node.options)
             for option in node.options:
-                next_selected = selected | ({option.fact} if option.fact else set())
+                next_selected = selected | set(option.facts)
                 # Keep nested choices in their original slot.
                 walk(nodes[:first] + option.nodes + nodes[first+1:], next_selected, product * (option.weight / option_total))
             return
@@ -364,7 +363,68 @@ def expand_prompt(template: str, seed: int = 0) -> str:
         if rng.random() * total < factor:
             selected_result = (nodes, selected)
 
-    walk(tree, set(), 1.0)
+    def upper_bound(nodes):
+        value = 1
+        for node in nodes:
+            if isinstance(node, Choice):
+                if _contains_fact((node,)):
+                    value *= sum(upper_bound(opt.nodes) for opt in node.options)
+            elif isinstance(node, If):
+                value *= upper_bound(node.nodes)
+            if value > MAX_VALID_STATES:
+                return value
+        return value
+
+    try:
+        if upper_bound(tree) > MAX_VALID_STATES:
+            raise PromptSyntaxError(f'Exact constraint sampling limit exceeded ({MAX_VALID_STATES} selections)')
+        walk(tree, set(), 1.0)
+    except PromptSyntaxError as exc:
+        if MAX_VALID_STATES != 200_000 or 'Exact constraint sampling limit exceeded' not in str(exc):
+            raise
+        # Large templates: randomized, bounded depth-first search with
+        # sound hard-rule pruning. This is NOT exact weighted sampling.
+        # Do not return a rule-invalid selection or silently ignore rules.
+        budget = [200_000]
+        def possible(nodes):
+            return _facts(nodes)
+        def search(nodes, selected):
+            budget[0] -= 1
+            if budget[0] < 0:
+                raise PromptSyntaxError('Constrained search limit exceeded (200000 branches)')
+            future = possible(nodes)
+            for rule in hard:
+                if rule.source in selected:
+                    if rule.positive and rule.target not in selected and rule.target not in future:
+                        return None
+                    if not rule.positive and rule.target in selected:
+                        return None
+            first = next((i for i, n in enumerate(nodes) if isinstance(n, Choice) and _contains_fact((n,))), None)
+            if first is None:
+                return (nodes, selected) if valid(selected) else None
+            node = nodes[first]
+            remaining = list(node.options)
+            while remaining:
+                # Prefer alternatives that satisfy a soft rule at this step.
+                # This is a local heuristic in bounded mode, not exact global sampling.
+                weights = []
+                for opt in remaining:
+                    after = selected | set(opt.facts)
+                    weight = opt.weight
+                    for pref in preferences:
+                        if (pref.source in after and pref.target in after
+                                and not (pref.source in selected and pref.target in selected)):
+                            weight *= pref.factor
+                    weights.append(weight)
+                if not all(math.isfinite(w) and w > 0 for w in weights):
+                    raise PromptSyntaxError('Selection weights overflow; reduce weights')
+                index = rng.choices(range(len(remaining)), weights=weights, k=1)[0]
+                option = remaining.pop(index)
+                result = search(nodes[:first] + option.nodes + nodes[first+1:], selected | set(option.facts))
+                if result is not None:
+                    return result
+            return None
+        selected_result = search(tree, set())
     if selected_result is None: raise PromptSyntaxError('No rule-consistent expansion exists')
     result = _render(*selected_result, rng).strip()
     if len(result) > MAX_EXPANDED_CHARS: raise PromptSyntaxError('Rendered prompt exceeds size limit')
