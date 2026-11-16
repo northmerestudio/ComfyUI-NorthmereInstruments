@@ -1,0 +1,31 @@
+/* Only the Northmere template textarea is affected; the native input stays interactive. */
+textarea.nmi-prompt-source {
+  z-index: 1;
+  color: transparent !important;
+  -webkit-text-fill-color: transparent;
+  caret-color: var(--input-text, currentColor);
+}
+textarea.nmi-prompt-source::selection { background: rgba(110, 145, 210, .35); }
+.nmi-prompt-highlight {
+  position: absolute;
+  z-index: 2;
+  margin: 0;
+  overflow: auto;
+  scrollbar-width: none;
+  pointer-events: none;
+  white-space: pre-wrap;
+  overflow-wrap: break-word;
+  word-break: normal;
+}
+.nmi-prompt-highlight::-webkit-scrollbar { display: none; }
+/* Contrast-conscious colors for light and dark *ComfyUI* themes. */
+.nmi-prompt-highlight[data-theme='light'] .nmi-prompt-directive { color: #7440a3; }
+.nmi-prompt-highlight[data-theme='light'] .nmi-prompt-delimiter { color: #176b80; }
+.nmi-prompt-highlight[data-theme='light'] .nmi-prompt-weight { color: #96521c; }
+.nmi-prompt-highlight[data-theme='light'] .nmi-prompt-operator { color: #9b3651; }
+.nmi-prompt-highlight[data-theme='light'] .nmi-prompt-escape { color: #667080; }
+.nmi-prompt-highlight[data-theme='dark'] .nmi-prompt-directive { color: #d5a4ff; }
+.nmi-prompt-highlight[data-theme='dark'] .nmi-prompt-delimiter { color: #78d7e3; }
+.nmi-prompt-highlight[data-theme='dark'] .nmi-prompt-weight { color: #ffc17b; }
+.nmi-prompt-highlight[data-theme='dark'] .nmi-prompt-operator { color: #ff9db1; }
+.nmi-prompt-highlight[data-theme='dark'] .nmi-prompt-escape { color: #abb7c6; }
