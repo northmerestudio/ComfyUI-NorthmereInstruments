@@ -7,7 +7,6 @@ import logging
 import math
 import random
 import re
-from fractions import Fraction
 from . import dynamic_prompt_parser as language
 MAX_NODES = 30000
 MAX_RENDERED = 1000000
