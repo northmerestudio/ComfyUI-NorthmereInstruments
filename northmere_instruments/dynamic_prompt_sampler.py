@@ -1,23 +1,32 @@
-"""Northmere prompt language: parsed AST, exact small-state sampling, bounded large-state search.
+"""Prompt expansion: exact small-state sampling and bounded constrained search.
 
-Approximate search enforces hard rules but does not promise the exact target law.
+Approximate search enforces hard rules but does not reproduce exact probabilities.
 """
 from __future__ import annotations
+
 import logging
 import math
 import random
 import re
+from typing import Literal, TypeAlias
+
 from . import dynamic_prompt_parser as language
+
 MAX_NODES = 30000
 MAX_RENDERED = 1000000
 MAX_SEARCH = 200000
 EXACT_BUDGET = 12000
 
-class PromptLanguageError(ValueError):
-    pass
 
-def _expand_refs(nodes, templates, count, stack=()):
-    result = []
+class PromptLanguageError(ValueError):
+    """Invalid prompt or a sampling resource limit was reached."""
+
+
+def _expand_refs(
+    nodes: tuple[language.Node, ...], templates: dict[str, tuple[language.Node, ...]],
+    count: list[int], stack: tuple[str, ...] = (),
+) -> tuple[language.Node, ...]:
+    result: list[language.Node] = []
     for node in nodes:
         count[0] += 1
         if count[0] > MAX_NODES:
@@ -27,15 +36,20 @@ def _expand_refs(nodes, templates, count, stack=()):
                 raise PromptLanguageError('Cyclic template reference')
             result.extend(_expand_refs(templates[node.name], templates, count, stack + (node.name,)))
         elif isinstance(node, language.Choice):
-            result.append(language.Choice(tuple((language.Branch(_expand_refs(b.children, templates, count, stack), b.facts, b.weight) for b in node.branches))))
+            branches = tuple(
+                language.Branch(_expand_refs(b.children, templates, count, stack), b.facts, b.weight)
+                for b in node.branches
+            )
+            result.append(language.Choice(branches))
         elif isinstance(node, language.Conditional):
             result.append(language.Conditional(node.condition, _expand_refs(node.children, templates, count, stack)))
         else:
             result.append(node)
     return tuple(result)
 
-def _possible(nodes):
-    facts = set()
+
+def _possible(nodes: tuple[language.Node, ...]) -> set[str]:
+    facts: set[str] = set()
     for node in nodes:
         if isinstance(node, language.Choice):
             for b in node.branches:
@@ -43,8 +57,12 @@ def _possible(nodes):
                 facts.update(_possible(b.children))
     return facts
 
-def _render(nodes, facts, rng, count):
-    out = []
+
+def _render(
+    nodes: tuple[language.Node, ...], facts: frozenset[str],
+    rng: random.Random, count: list[int],
+) -> str:
+    out: list[str] = []
     for node in nodes:
         if isinstance(node, language.Text):
             out.append(node.value)
@@ -61,14 +79,18 @@ def _render(nodes, facts, rng, count):
             raise PromptLanguageError('Rendered prompt exceeds size limit')
     return ''.join(out)
 
-def _expr_names(expr):
+
+def _expr_names(expr: language.Expression) -> set[str]:
     if expr[0] == 'name':
         return {expr[1]}
     if expr[0] == 'not':
         return _expr_names(expr[1])
     return _expr_names(expr[1]) | _expr_names(expr[2])
 
-def _tri(expr, present, possible):
+
+def _tri(
+    expr: language.Expression, present: frozenset[str], possible: set[str],
+) -> bool | None:
     """False/True/None for definitely false/true/as-yet-undecided."""
     typ = expr[0]
     if typ == 'name':
@@ -84,10 +106,11 @@ def _tri(expr, present, possible):
         return True if a is True or b is True else False if a is False and b is False else None
     raise AssertionError(typ)
 
-def _bounded_sample(p, seed):
+
+def _bounded_sample(p: language.Program, seed: int) -> tuple[str, dict[str, object]]:
     rng = random.Random(seed)
     tree = _expand_refs(p.body, p.templates, [0])
-    decisions = []
+    decisions: list[language.Choice] = []
     for name, variants in p.decisions.items():
         branches = [language.Branch((), frozenset({name + '.' + v}), w) for v, w in variants]
         decisions.append(language.Choice(tuple(branches)))
@@ -96,7 +119,9 @@ def _bounded_sample(p, seed):
     pref_names = set().union(*(_expr_names(a) for a, _ in p.preferences)) if p.preferences else set()
     count = [0]
 
-    def search(nodes, selected):
+    def search(
+        nodes: tuple[language.Node, ...], selected: frozenset[str],
+    ) -> tuple[tuple[language.Node, ...], frozenset[str]] | None:
         count[0] += 1
         if count[0] > MAX_SEARCH:
             raise PromptLanguageError('Bounded constraint search exhausted; simplify rules or choices')
@@ -143,7 +168,18 @@ def _bounded_sample(p, seed):
     nodes, facts = resolved
     return (_render(nodes, facts, rng, [0]), {'mode': 'approximate', 'facts': sorted(facts), 'attempts': count[0]})
 
-def expand_prompt(source: str, seed: int=0, *, mode: str='auto', with_trace: bool=False):
+
+SamplingMode: TypeAlias = Literal['auto', 'exact', 'approximate']
+
+
+def expand_prompt(
+    source: str, seed: int = 0, *, mode: SamplingMode = 'auto', with_trace: bool = False,
+) -> str | tuple[str, dict[str, object]]:
+    """Expand a prompt with deterministic seed and optional solver trace.
+
+    Exact mode draws from the normalized derivation distribution. Automatic
+    mode falls back to bounded search when exact enumeration is too large.
+    """
     if not isinstance(source, str):
         raise PromptLanguageError('Prompt must be text')
     if not isinstance(seed, int) or isinstance(seed, bool) or seed < 0 or (seed >= 2 ** 64):

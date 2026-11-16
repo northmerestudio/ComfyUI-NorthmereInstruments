@@ -10,16 +10,18 @@ CATEGORY = 'Northmere Instruments/Prompt'
 
 
 class PromptTemplateInput(io.String.Input):
-    """Text input with syntax highlighting."""
+    """STRING input with the dedicated prompt editor widget."""
 
     def __init__(self) -> None:
         super().__init__(
             'template', multiline=True, default='',
-            tooltip='Choices: {red | blue} or {red @3 | blue @1}. Tagged choices: '
-                    '{day => sun | _ => cloud}. Use an optional --- header for let, choose, require and prefer.',
+            tooltip='Use {red | blue} for alternatives, @3 for a weight, and => for facts. '
+                    'Optional --- header: choose, let, require, prefer. '
+                    'Use $name for reusable text and ?fact{text} for conditions.',
         )
         self.widget_type = 'NORTHMERE_INSTRUMENTS_PROMPT'
         self.socketless = True
+
 
 class DynamicPromptNode(io.ComfyNode):
     @classmethod
@@ -28,7 +30,8 @@ class DynamicPromptNode(io.ComfyNode):
             node_id='NorthmereInstruments.DynamicPrompt',
             display_name='Northmere Dynamic Prompt',
             category=CATEGORY,
-            description='Build seeded prompts with choices, weights, conditions, reusable text and constraints. Declare let, choose, require and prefer in a --- header.',
+            description='Expand seeded text choices with weights, shared decisions, reusable templates, '
+                        'conditional text and hard/soft constraints. Optional --- header defines rules.',
             search_aliases=['northmere prompt', 'dynamic prompt', 'random prompt', 'prompt template'],
             inputs=[
                 PromptTemplateInput(),
@@ -38,6 +41,7 @@ class DynamicPromptNode(io.ComfyNode):
             ],
             outputs=[io.String.Output(display_name='prompt')],
         )
+
     @classmethod
     def execute(cls, template: str, seed: int) -> io.NodeOutput:
         return io.NodeOutput(expand_prompt(template, seed=seed))

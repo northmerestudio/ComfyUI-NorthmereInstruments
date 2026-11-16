@@ -1,4 +1,4 @@
-"""v4 syntax, reference parity, large prompt and hard-rule invariants."""
+"""Current prompt syntax, exact semantics, and constrained search tests."""
 from pathlib import Path
 from fractions import Fraction
 import pytest

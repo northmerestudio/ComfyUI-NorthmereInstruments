@@ -1,4 +1,4 @@
-"""Offline ComfyUI V3 adapter smoke test for the breaking prompt language."""
+"""Offline ComfyUI node-schema and prompt-output smoke test."""
 import importlib
 import sys
 from types import ModuleType, SimpleNamespace

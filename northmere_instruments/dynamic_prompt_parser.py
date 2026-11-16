@@ -1,18 +1,22 @@
-"""Northmere prompt language small-state semantics oracle.
-
-Intentionally bounded enumerator, NOT a production parser/solver.
-Implements the normative core used in conformance tests.
-"""
+"""Prompt language parsing, validation, and bounded exact semantics."""
 from __future__ import annotations
-from dataclasses import dataclass
-from fractions import Fraction
+
+import hashlib
 import itertools
 import re
+from dataclasses import dataclass
+from fractions import Fraction
+from functools import reduce
+from math import lcm
+from typing import Iterator, Literal, TypeAlias
+
 ID = '[A-Za-z][A-Za-z0-9_]*'
 PATH = f'{ID}(?:\\.{ID})*'
 
+
 class LanguageError(ValueError):
-    pass
+    """Invalid prompt syntax, semantics, or exact sampling budget."""
+
 
 @dataclass(frozen=True)
 class Text:
@@ -25,11 +29,11 @@ class Ref:
 @dataclass(frozen=True)
 class Conditional:
     condition: str
-    children: tuple
+    children: tuple[Node, ...]
 
 @dataclass(frozen=True)
 class Branch:
-    children: tuple
+    children: tuple[Node, ...]
     facts: frozenset[str]
     weight: Fraction
 
@@ -37,17 +41,29 @@ class Branch:
 class Choice:
     branches: tuple[Branch, ...]
 
-class Reader:
 
-    def __init__(self, data):
+Node: TypeAlias = Text | Ref | Conditional | Choice
+Expression: TypeAlias = (
+    tuple[Literal['name'], str]
+    | tuple[Literal['not'], 'Expression']
+    | tuple[Literal['and', 'or'], 'Expression', 'Expression']
+)
+Fragment: TypeAlias = str | tuple[Literal['if'], str, tuple['Fragment', ...]]
+Derivation: TypeAlias = tuple[tuple[Fragment, ...], frozenset[str], Fraction]
+Outcome: TypeAlias = tuple[str, frozenset[str], Fraction]
+
+class Reader:
+    """Read nested prompt expressions into immutable syntax nodes."""
+
+    def __init__(self, data: str) -> None:
         self.data = data
         self.pos = 0
 
-    def parse(self, stop=''):
-        parts = []
-        buf = []
+    def parse(self, stop: str = '') -> tuple[Node, ...]:
+        parts: list[Node] = []
+        buf: list[str] = []
 
-        def flush():
+        def flush() -> None:
             if buf:
                 parts.append(Text(''.join(buf)))
                 buf.clear()
@@ -93,7 +109,7 @@ class Reader:
         flush()
         return tuple(parts)
 
-    def choice(self):
+    def choice(self) -> Choice:
         # Scan nested choices and escapes before parsing each alternative.
         start = self.pos
         depth = 0
@@ -158,13 +174,13 @@ class Reader:
             raise LanguageError('mixed fact tags and plain branches')
         return Choice(tuple(branches))
 
-def parse_expr(expr):
+def parse_expr(expr: str) -> Expression:
     tokens = re.findall(f'{PATH}|[!&|()]', expr)
     if ''.join(tokens) != re.sub('\\s+', '', expr):
         raise LanguageError('invalid Boolean expression')
     pos = 0
 
-    def atom():
+    def atom() -> Expression:
         nonlocal pos
         if pos == len(tokens):
             raise LanguageError('incomplete expression')
@@ -182,7 +198,7 @@ def parse_expr(expr):
             return ('name', t)
         raise LanguageError('invalid expression token')
 
-    def ands():
+    def ands() -> Expression:
         nonlocal pos
         v = atom()
         while pos < len(tokens) and tokens[pos] == '&':
@@ -190,7 +206,7 @@ def parse_expr(expr):
             v = ('and', v, atom())
         return v
 
-    def ors():
+    def ors() -> Expression:
         nonlocal pos
         v = ands()
         while pos < len(tokens) and tokens[pos] == '|':
@@ -202,7 +218,7 @@ def parse_expr(expr):
         raise LanguageError('trailing expression tokens')
     return result
 
-def eval_expr(e, facts):
+def eval_expr(e: Expression, facts: frozenset[str] | set[str]) -> bool:
     kind = e[0]
     if kind == 'name':
         return e[1] in facts
@@ -216,31 +232,32 @@ def eval_expr(e, facts):
 
 @dataclass
 class Program:
-    body: tuple
-    templates: dict
-    decisions: dict
-    requirements: list
-    preferences: list
+    body: tuple[Node, ...]
+    templates: dict[str, tuple[Node, ...]]
+    decisions: dict[str, list[tuple[str, Fraction]]]
+    requirements: list[tuple[Expression, Expression]]
+    preferences: list[tuple[Expression, Fraction]]
 
-def parse(source):
-    templates = {}
-    decisions = {}
-    requirements = []
-    preferences = []
+def parse(source: str) -> Program:
+    """Parse and validate an entire prompt, including its optional header."""
+    templates: dict[str, tuple[Node, ...]] = {}
+    decisions: dict[str, list[tuple[str, Fraction]]] = {}
+    requirements: list[tuple[Expression, Expression]] = []
+    preferences: list[tuple[Expression, Fraction]] = []
     body = source
-    if source.startswith('---\n'):
-        match = re.search('^---\\s*$', source[4:], re.M)
+    if source.startswith(('---\n', '---\r\n')):
+        opening_length = 5 if source.startswith('---\r\n') else 4
+        match = re.search(r'^---[ \t]*\r?$', source[opening_length:], re.M)
         if not match:
             raise LanguageError('unclosed header')
-        header = source[4:4 + match.start()]
-        body = source[4 + match.end():]
-        if body.startswith('\n'):
-            body = body[1:]
+        header = source[opening_length:opening_length + match.start()]
+        body = source[opening_length + match.end():]
+        body = body.removeprefix('\r\n') if body.startswith('\r\n') else body.removeprefix('\n')
         statements = []
         cur = ''
         depth = 0
         for line in header.splitlines():
-            if not cur and (not line.strip() or line.lstrip().startswith('#')):
+            if line.lstrip().startswith('#') or (not cur and not line.strip()):
                 continue
             cur += ('\n' if cur else '') + line
             depth += line.count('{') - line.count('}')
@@ -295,7 +312,11 @@ def parse(source):
     validate(p)
     return p
 
-def traverse(nodes, templates, stack=()):
+
+def traverse(
+    nodes: tuple[Node, ...], templates: dict[str, tuple[Node, ...]],
+    stack: tuple[str, ...] = (),
+) -> 'Iterator[Node]':
     for node in nodes:
         yield node
         if isinstance(node, Ref):
@@ -310,7 +331,8 @@ def traverse(nodes, templates, stack=()):
         if isinstance(node, Conditional):
             yield from traverse(node.children, templates, stack)
 
-def validate(p):
+def validate(p: Program) -> None:
+    """Reject missing references, recursive templates, and unknown facts."""
     for key in p.templates:
         list(traverse(p.templates[key], p.templates, (key,)))
     allnodes = list(traverse(p.body, p.templates))
@@ -330,7 +352,7 @@ def validate(p):
             if any((isinstance(n, Choice) and any((b.facts for b in n.branches)) for n in traverse(node.children, p.templates))):
                 raise LanguageError('fact-emitting choice inside conditional')
 
-    def refs(expr):
+    def refs(expr: Expression) -> set[str]:
         if expr[0] == 'name':
             return {expr[1]}
         if expr[0] == 'not':
@@ -343,14 +365,14 @@ def validate(p):
         if refs(expr) - names:
             raise LanguageError('unknown preference symbol')
 
-def enumerate_outcomes(p, max_states=30000):
+def enumerate_outcomes(p: Program, max_states: int = 30000) -> list[Outcome]:
     """Exact bounded semantic oracle; returns (output, facts, Fraction probability).
 
     A derivation includes all active independent choices and template expansions.
     Conditional content may contain choices but never fact-producing choices.
     """
 
-    def expand(nodes):
+    def expand(nodes: tuple[Node, ...]) -> list[Derivation]:
         acc = [((), frozenset(), Fraction(1))]
         for node in nodes:
             if isinstance(node, Text):
@@ -375,7 +397,7 @@ def enumerate_outcomes(p, max_states=30000):
             acc = updated
         return acc
 
-    def render(frags, facts):
+    def render(frags: tuple[Fragment, ...], facts: frozenset[str]) -> str:
         result = []
         for frag in frags:
             if isinstance(frag, str):
@@ -393,12 +415,12 @@ def enumerate_outcomes(p, max_states=30000):
         variant_lists.append([(f'{name}.{v}', w / total) for v, w in variants])
     for selections in itertools.product(*variant_lists):
         decision_facts = frozenset((name for name, _ in selections))
-        decision_mass = __import__('functools').reduce(lambda a, b: a * b, (w for _, w in selections), Fraction(1))
+        decision_mass = reduce(lambda a, b: a * b, (w for _, w in selections), Fraction(1))
         for frags, facts, mass in expand(p.body):
             allfacts = facts | decision_facts
             if not all((not eval_expr(a, allfacts) or eval_expr(b, allfacts) for a, b in p.requirements)):
                 continue
-            pref = __import__('functools').reduce(lambda a, b: a * b, (factor for pred, factor in p.preferences if eval_expr(pred, allfacts)), Fraction(1))
+            pref = reduce(lambda a, b: a * b, (factor for pred, factor in p.preferences if eval_expr(pred, allfacts)), Fraction(1))
             states.append((render(frags, allfacts), allfacts, mass * decision_mass * pref))
             if len(states) > max_states:
                 raise LanguageError('exact reference budget exceeded')
@@ -407,19 +429,20 @@ def enumerate_outcomes(p, max_states=30000):
     total = sum((mass for _, _, mass in states), Fraction(0))
     return [(out, facts, mass / total) for out, facts, mass in states]
 
-def exact_sample(p, seed, outcomes=None):
-    """Portable exact-reference profile v4: SHA-256 counter bits + rejection.
+
+def exact_sample(
+    p: Program, seed: int, outcomes: list[Outcome] | None = None,
+) -> tuple[str, frozenset[str]]:
+    """Portable exact-reference profile: SHA-256 counter bits + rejection.
 
     The ordering of derivations is decisions in declaration order, alternatives
     in source order, recursively depth-first. This implementation keeps that
     ordering via enumerate_outcomes.
     """
-    import hashlib
     if not isinstance(seed, int) or isinstance(seed, bool) or (not -2 ** 63 <= seed < 2 ** 63):
         raise LanguageError('seed must be a signed 64-bit integer')
     if outcomes is None:
         outcomes = enumerate_outcomes(p)
-    from math import lcm
     d = lcm(*(mass.denominator for _, _, mass in outcomes))
     weights = [int(mass * d) for _, _, mass in outcomes]
     total = sum(weights)
@@ -428,7 +451,7 @@ def exact_sample(p, seed, outcomes=None):
     pool = 0
     available = 0
 
-    def bit():
+    def bit() -> int:
         nonlocal counter, pool, available
         if not available:
             if counter >= 2 ** 64:
