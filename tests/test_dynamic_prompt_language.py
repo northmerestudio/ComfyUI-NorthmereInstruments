@@ -7,6 +7,7 @@ from northmere_instruments.dynamic_prompt_sampler import expand_prompt, PromptLa
 from northmere_instruments.dynamic_prompt_parser import parse, enumerate_outcomes, eval_expr
 
 ROOT=Path(__file__).resolve().parents[1]
+PROMPT=(ROOT/'examples'/'Prompt.nmp').read_text()
 
 
 def test_small_exact_reference_weights():
@@ -37,6 +38,24 @@ def test_approximate_hard_rules_even_with_boolean_expressions():
         assert trace['mode']=='approximate'
 
 
+def test_large_prompt_parses_and_all_hard_rules_hold():
+    p=parse(PROMPT)
+    assert len(p.templates)==7
+    assert len(p.requirements)==13
+    assert len(p.preferences)==10
+    assert 'attire' in p.decisions
+    for s in range(100):
+        out,trace=expand_prompt(PROMPT,s,with_trace=True)
+        assert out.startswith('Natural photograph of sks')
+        assert trace['mode']=='approximate'
+        facts=set(trace['facts'])
+        assert sum(f in facts for f in ('attire.nude','attire.dressed'))==1
+        assert all(not eval_expr(a,facts) or eval_expr(b,facts) for a,b in p.requirements)
+        assert ('attire.nude' in facts) == ('a nude,' in out)
+        assert ('attire.nude' in facts) == ('breasts, light skin' in out)
+        assert out == expand_prompt(PROMPT,s)
+
+
 def test_errors_are_not_silent():
     with pytest.raises(PromptLanguageError):expand_prompt('{bad => a | b}',seed=0)
     with pytest.raises(PromptLanguageError, match='Legacy v3'):expand_prompt('@pick{day: sun | night: moon}',seed=0)
@@ -44,3 +63,6 @@ def test_errors_are_not_silent():
     with pytest.raises(PromptLanguageError):expand_prompt('---\nrequire a -> !a\n---\n{a => A | a => B}',seed=1)
 
 
+def test_source_rejects_legacy_directives():
+    for token in ('@pick{','@define','@rules','@if('):
+        assert token not in PROMPT
