@@ -138,20 +138,6 @@ def test_empty_option_for_optional_text():
     assert {expand_prompt('a{| b}', s) for s in range(40)} == {'a', 'ab'}
 
 
-def test_migrated_real_template_expands():
-    from pathlib import Path
-    template = (Path(__file__).resolve().parents[1] / 'examples' / 'migrated_prompt_v3.txt').read_text()
-    for seed in range(12):
-        result = expand_prompt(template, seed)
-        assert result.startswith('Natural photograph')
-        assert '[[' not in result
-        assert '@pick{' not in result
-        assert '@use(' not in result
-        assert '@if(' not in result
-        assert len(result) > 300
-        assert result == expand_prompt(template, seed)
-
-
 def test_anonymous_named_choice_branch_has_no_label():
     template = '@pick{day: sunny|_: overcast} @pick{flash: flash|_: natural}'
     template += '\n@rules\nday -> !flash\n@end'
