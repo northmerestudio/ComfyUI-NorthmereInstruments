@@ -85,7 +85,9 @@ def _extract(template: str) -> tuple[str, dict[str, str], str]:
         if not match:
             if END_BLOCK.fullmatch(lines[i].rstrip('\r\n')):
                 raise PromptSyntaxError(f'Unexpected @end on line {i+1}')
-            output.append(lines[i]); i += 1; continue
+            output.append(lines[i])
+            i += 1
+            continue
         kind, arg = match.groups()
         name = arg.strip()
         if kind == 'define' and not NAME_RE.fullmatch(name):
@@ -99,16 +101,20 @@ def _extract(template: str) -> tuple[str, dict[str, str], str]:
         while i < len(lines) and not END_BLOCK.fullmatch(lines[i].rstrip('\r\n')):
             if BLOCK_START.fullmatch(lines[i].rstrip('\r\n')):
                 raise PromptSyntaxError('Nested @define/@rules blocks are not allowed')
-            body.append(lines[i]); i += 1
+            body.append(lines[i])
+            i += 1
         if i == len(lines):
             raise PromptSyntaxError(f'Unclosed @{kind} block')
         i += 1
         if kind == 'define':
-            if name in definitions: raise PromptSyntaxError(f'Duplicate definition: {name}')
+            if name in definitions:
+                raise PromptSyntaxError(f'Duplicate definition: {name}')
             definitions[name] = ''.join(body).strip('\r\n')
-            if len(definitions) > MAX_DEFINITIONS: raise PromptSyntaxError('Too many definitions')
+            if len(definitions) > MAX_DEFINITIONS:
+                raise PromptSyntaxError('Too many definitions')
         else:
-            if rule_lines: raise PromptSyntaxError('Only one @rules block is supported')
+            if rule_lines:
+                raise PromptSyntaxError('Only one @rules block is supported')
             rule_lines = body or ['\n']
     return ''.join(output).strip('\r\n'), definitions, ''.join(rule_lines)
 
@@ -116,23 +122,32 @@ def _extract(template: str) -> tuple[str, dict[str, str], str]:
 def _resolve(text: str, definitions: dict[str, str], stack: tuple[str, ...] = ()) -> str:
     # A scanner ensures escaped @use() remains literal; no regex replacement on escaped text.
     out: list[str] = []
-    i = 0; size = 0
+    i = 0
+    size = 0
     while i < len(text):
         if text[i] == '\\' and i + 1 < len(text) and text[i+1] == '@':
-            piece = text[i:i+2]; i += 2
+            piece = text[i:i+2]
+            i += 2
         elif text.startswith('@use', i):
             m = USE.match(text, i)
-            if not m: raise PromptSyntaxError(f'Malformed @use at offset {i}')
+            if not m:
+                raise PromptSyntaxError(f'Malformed @use at offset {i}')
             name = m.group(1)
-            if name not in definitions: raise PromptSyntaxError(f'Unknown definition: {name}')
-            if name in stack: raise PromptSyntaxError('Recursive definition: ' + ' -> '.join((*stack, name)))
-            if len(stack) >= MAX_REFERENCE_DEPTH: raise PromptSyntaxError('Definition reference depth exceeded')
+            if name not in definitions:
+                raise PromptSyntaxError(f'Unknown definition: {name}')
+            if name in stack:
+                raise PromptSyntaxError('Recursive definition: ' + ' -> '.join((*stack, name)))
+            if len(stack) >= MAX_REFERENCE_DEPTH:
+                raise PromptSyntaxError('Definition reference depth exceeded')
             piece = _resolve(definitions[name], definitions, (*stack, name))
             i = m.end()
         else:
-            piece = text[i]; i += 1
-        out.append(piece); size += len(piece)
-        if size > MAX_EXPANDED_CHARS: raise PromptSyntaxError('Expanded prompt exceeds size limit')
+            piece = text[i]
+            i += 1
+        out.append(piece)
+        size += len(piece)
+        if size > MAX_EXPANDED_CHARS:
+            raise PromptSyntaxError('Expanded prompt exceeds size limit')
     return ''.join(out)
 
 
@@ -144,43 +159,64 @@ class Parser:
 
     def parse(self) -> tuple[object, ...]:
         nodes, closing = self.sequence(0, None)
-        if closing is not None: raise PromptSyntaxError('Unexpected delimiter')
+        if closing is not None:
+            raise PromptSyntaxError('Unexpected delimiter')
         return nodes
 
     def sequence(self, depth: int, context: str | None) -> tuple[tuple[object, ...], str | None]:
-        if depth > MAX_DEPTH: raise PromptSyntaxError('Maximum nesting depth exceeded')
+        if depth > MAX_DEPTH:
+            raise PromptSyntaxError('Maximum nesting depth exceeded')
         nodes: list[object] = []
         buf: list[str] = []
         def flush():
             if buf:
-                nodes.append(Text(''.join(buf))); buf.clear()
+                nodes.append(Text(''.join(buf)))
+                buf.clear()
         while self.index < len(self.text):
             c = self.text[self.index]
             if c == '\\' and self.index + 1 < len(self.text) and self.text[self.index+1] in ESCAPE:
-                buf.append(self.text[self.index+1]); self.index += 2; continue
+                buf.append(self.text[self.index+1])
+                self.index += 2
+                continue
             if c == '@':
                 if self.text.startswith('@pick', self.index):
                     m = re.match(r'@pick\s*\{', self.text[self.index:])
-                    if not m: raise PromptSyntaxError(f'Malformed @pick at offset {self.index}')
-                    flush(); self.index += m.end()
-                    nodes.append(self.choice(depth+1, labelled=True)); continue
+                    if not m:
+                        raise PromptSyntaxError(f'Malformed @pick at offset {self.index}')
+                    flush()
+                    self.index += m.end()
+                    nodes.append(self.choice(depth+1, labelled=True))
+                    continue
                 if self.text.startswith('@if', self.index):
                     m = re.match(r'@if\s*\(\s*(' + NAME + r')\s*\)\s*\{', self.text[self.index:])
-                    if not m: raise PromptSyntaxError(f'Malformed @if at offset {self.index}')
-                    flush(); self.index += m.end()
+                    if not m:
+                        raise PromptSyntaxError(f'Malformed @if at offset {self.index}')
+                    flush()
+                    self.index += m.end()
                     body, stop = self.sequence(depth+1, 'if')
-                    if stop != '}': raise PromptSyntaxError('Unclosed @if body')
-                    nodes.append(If(m.group(1), body)); continue
+                    if stop != '}':
+                        raise PromptSyntaxError('Unclosed @if body')
+                    nodes.append(If(m.group(1), body))
+                    continue
                 if re.match(r'@(define|rules|end|use)\b', self.text[self.index:]):
                     raise PromptSyntaxError(f'Misplaced directive at offset {self.index}')
             if c == '{':
-                flush(); self.index += 1; nodes.append(self.choice(depth+1, labelled=False)); continue
+                flush()
+                self.index += 1
+                nodes.append(self.choice(depth+1, labelled=False))
+                continue
             if c == '}':
-                if context is None: raise PromptSyntaxError(f'Unexpected }} at offset {self.index}')
-                flush(); self.index += 1; return tuple(nodes), '}'
+                if context is None:
+                    raise PromptSyntaxError(f'Unexpected }} at offset {self.index}')
+                flush()
+                self.index += 1
+                return tuple(nodes), '}'
             if c == '|' and context in ('choice', 'pick'):
-                flush(); self.index += 1; return tuple(nodes), '|'
-            buf.append(c); self.index += 1
+                flush()
+                self.index += 1
+                return tuple(nodes), '|'
+            buf.append(c)
+            self.index += 1
         flush()
         return tuple(nodes), None
 
@@ -190,31 +226,39 @@ class Parser:
             facts = ()
             if labelled:
                 m = LABEL.match(self.text, self.index)
-                if m is None: raise PromptSyntaxError(f'Expected named alternative in @pick near offset {self.index}')
+                if m is None:
+                    raise PromptSyntaxError(f'Expected named alternative in @pick near offset {self.index}')
                 facts = () if m.group(1) == '_' else tuple(x.strip() for x in m.group(1).split(','))
                 if len(facts) != len(set(facts)):
                     raise PromptSyntaxError('Duplicate labels in alternative')
                 self.index = m.end()
             m = WEIGHT.match(self.text, self.index)
             weight = float(m.group(1)) if m else 1.0
-            if m: self.index = m.end()
+            if m:
+                self.index = m.end()
             if not math.isfinite(weight) or weight <= 0:
                 raise PromptSyntaxError('Choice weight must be positive and finite')
             body, stop = self.sequence(depth, 'pick' if labelled else 'choice')
             body = _trim(body)
             options.append(Option(body, weight, facts))
-            if stop == '}': break
-            if stop is None: raise PromptSyntaxError('Unclosed choice')
-        if len(options) < 2: raise PromptSyntaxError('Choices require at least two alternatives')
+            if stop == '}':
+                break
+            if stop is None:
+                raise PromptSyntaxError('Unclosed choice')
+        if len(options) < 2:
+            raise PromptSyntaxError('Choices require at least two alternatives')
         self.node_count += 1
-        if self.node_count > MAX_NODES: raise PromptSyntaxError('Too many choices')
+        if self.node_count > MAX_NODES:
+            raise PromptSyntaxError('Too many choices')
         return Choice(tuple(options))
 
 
 def _trim(nodes: tuple[object, ...]) -> tuple[object, ...]:
     items = list(nodes)
-    if items and isinstance(items[0], Text): items[0] = Text(items[0].value.lstrip())
-    if items and isinstance(items[-1], Text): items[-1] = Text(items[-1].value.rstrip())
+    if items and isinstance(items[0], Text):
+        items[0] = Text(items[0].value.lstrip())
+    if items and isinstance(items[-1], Text):
+        items[-1] = Text(items[-1].value.rstrip())
     return tuple(x for x in items if not (isinstance(x, Text) and not x.value))
 
 
@@ -232,25 +276,33 @@ def _facts(nodes: tuple[object, ...]) -> set[str]:
 
 
 def _rules(text: str, facts: set[str]) -> tuple[tuple[Rule, ...], tuple[Preference, ...]]:
-    hard = []; soft = []
+    hard = []
+    soft = []
     for index, raw in enumerate(text.splitlines(), 1):
         line = raw.strip()
-        if not line or line.startswith('#'): continue
+        if not line or line.startswith('#'):
+            continue
         m = HARD.fullmatch(line)
         if m:
             a, neg, b = m.groups()
             rule = Rule(a, b, not bool(neg))
-            if a == b and neg: raise PromptSyntaxError(f'Self-excluding rule at line {index}')
-            if Rule(a, b, not rule.positive) in hard: raise PromptSyntaxError('Contradictory hard rules')
-            if rule not in hard: hard.append(rule)
+            if a == b and neg:
+                raise PromptSyntaxError(f'Self-excluding rule at line {index}')
+            if Rule(a, b, not rule.positive) in hard:
+                raise PromptSyntaxError('Contradictory hard rules')
+            if rule not in hard:
+                hard.append(rule)
         else:
             m = SOFT.fullmatch(line)
-            if not m: raise PromptSyntaxError(f'Invalid rule on @rules line {index}: {line}')
+            if not m:
+                raise PromptSyntaxError(f'Invalid rule on @rules line {index}: {line}')
             a, b, value = m.groups()
             factor = float(value)
-            if not math.isfinite(factor) or factor <= 0: raise PromptSyntaxError('Invalid soft weight')
+            if not math.isfinite(factor) or factor <= 0:
+                raise PromptSyntaxError('Invalid soft weight')
             rule = Preference(a, b, factor)
-            if rule in soft: raise PromptSyntaxError('Duplicate preference')
+            if rule in soft:
+                raise PromptSyntaxError('Duplicate preference')
             soft.append(rule)
         if a not in facts or b not in facts:
             raise PromptSyntaxError(f'Unknown label in rule on line {index}: {a} / {b}')
@@ -260,10 +312,12 @@ def _rules(text: str, facts: set[str]) -> tuple[tuple[Rule, ...], tuple[Preferen
 def _validate_conditions(nodes: tuple[object, ...], facts: set[str]) -> None:
     for node in nodes:
         if isinstance(node, If):
-            if node.fact not in facts: raise PromptSyntaxError(f'Unknown label in @if: {node.fact}')
+            if node.fact not in facts:
+                raise PromptSyntaxError(f'Unknown label in @if: {node.fact}')
             _validate_conditions(node.nodes, facts)
         elif isinstance(node, Choice):
-            for opt in node.options: _validate_conditions(opt.nodes, facts)
+            for opt in node.options:
+                _validate_conditions(opt.nodes, facts)
 
 
 def _contains_fact(nodes: tuple[object, ...]) -> bool:
@@ -297,7 +351,8 @@ def _render(nodes: tuple[object, ...], facts: set[str], rng: random.Random) -> s
 
 
 def expand_prompt(template: str, seed: int = 0) -> str:
-    if not isinstance(template, str): raise PromptSyntaxError('Prompt must be a string')
+    if not isinstance(template, str):
+        raise PromptSyntaxError('Prompt must be a string')
     if '[[' in template or ']]' in template:
         raise PromptSyntaxError('Legacy [[...]] syntax is removed; use @pick, @if, @define and @rules')
     source, definitions, rules_text = _extract(template)
@@ -325,11 +380,13 @@ def expand_prompt(template: str, seed: int = 0) -> str:
                     output.extend(branch)
                     selected.update(branch_facts)
                     selected.update(option.facts)
-                else: output.append(n)
+                else:
+                    output.append(n)
             return tuple(output), selected
         resolved, selected = choose(tree)
         rendered = _render(resolved, selected, rng).strip()
-        if len(rendered) > MAX_EXPANDED_CHARS: raise PromptSyntaxError('Rendered prompt exceeds size limit')
+        if len(rendered) > MAX_EXPANDED_CHARS:
+            raise PromptSyntaxError('Rendered prompt exceeds size limit')
         return rendered
 
     # Exact globally weighted sample over all complete valid selections using
@@ -352,15 +409,19 @@ def expand_prompt(template: str, seed: int = 0) -> str:
         explored += 1
         if explored > MAX_VALID_STATES:
             raise PromptSyntaxError(f'Exact constraint sampling limit exceeded ({MAX_VALID_STATES} selections)')
-        if not valid(selected): return
+        if not valid(selected):
+            return
         factor = product
         for pref in preferences:
             if pref.source in selected and pref.target in selected:
                 factor *= pref.factor
-        if not math.isfinite(factor): raise PromptSyntaxError('Selection weights overflow; reduce weights')
-        if factor <= 0: return
+        if not math.isfinite(factor):
+            raise PromptSyntaxError('Selection weights overflow; reduce weights')
+        if factor <= 0:
+            return
         total += factor
-        if not math.isfinite(total): raise PromptSyntaxError('Total weights overflow; reduce weights')
+        if not math.isfinite(total):
+            raise PromptSyntaxError('Total weights overflow; reduce weights')
         if rng.random() * total < factor:
             selected_result = (nodes, selected)
 
@@ -445,7 +506,9 @@ def expand_prompt(template: str, seed: int = 0) -> str:
                     return result
             return None
         selected_result = search(tree, set())
-    if selected_result is None: raise PromptSyntaxError('No rule-consistent expansion exists')
+    if selected_result is None:
+        raise PromptSyntaxError('No rule-consistent expansion exists')
     result = _render(*selected_result, rng).strip()
-    if len(result) > MAX_EXPANDED_CHARS: raise PromptSyntaxError('Rendered prompt exceeds size limit')
+    if len(result) > MAX_EXPANDED_CHARS:
+        raise PromptSyntaxError('Rendered prompt exceeds size limit')
     return result
