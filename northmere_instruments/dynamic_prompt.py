@@ -1,4 +1,4 @@
-"""Northmere Instruments dynamic prompt node, using the native ComfyUI V3 API."""
+"""Dynamic prompt node."""
 
 from __future__ import annotations
 
@@ -10,13 +10,13 @@ CATEGORY = 'Northmere Instruments/Prompt'
 
 
 class PromptTemplateInput(io.String.Input):
-    """Native STRING data with the same custom-widget contract as LoRA Envelope."""
+    """Text input with syntax highlighting."""
 
     def __init__(self) -> None:
         super().__init__(
             'template', multiline=True, default='',
-            tooltip='Use {one|two}, {3::one|two}, @pick{day: sunny|night: moonlit}, '
-                    '@if(day){warm light}, @define/@use and @rules/@end.',
+            tooltip='Write a prompt with choices like {red|blue}, weighted choices like '
+                    '{3::red|blue}, or @pick for named options.',
         )
         self.widget_type = 'NORTHMERE_INSTRUMENTS_PROMPT'
         self.socketless = True
@@ -26,15 +26,15 @@ class DynamicPromptNode(io.ComfyNode):
     def define_schema(cls) -> io.Schema:
         return io.Schema(
             node_id='NorthmereInstruments.DynamicPrompt',
-            display_name='Northmere Prompt v3',
+            display_name='Northmere Dynamic Prompt',
             category=CATEGORY,
-            description='Seeded choices, labelled @pick alternatives, definitions, conditions and rule-aware sampling.',
-            search_aliases=['northmere', 'dynamic prompt', 'seeded prompt', 'prompt rules'],
+            description='Build prompts with random choices, weights, conditions and reusable text.',
+            search_aliases=['northmere prompt', 'dynamic prompt', 'random prompt', 'prompt template'],
             inputs=[
                 PromptTemplateInput(),
                 io.Int.Input('seed', default=0, min=0, max=0xFFFFFFFFFFFFFFFF,
                              control_after_generate=True,
-                             tooltip='Deterministic expansion seed; independent of KSampler.'),
+                             tooltip='Controls which options are chosen. The same prompt and seed give the same result.'),
             ],
             outputs=[io.String.Output(display_name='prompt')],
         )
