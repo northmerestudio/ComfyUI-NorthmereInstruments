@@ -1,6 +1,6 @@
 """Chromium integration smoke for ComfyUI's documented widgetType creation path.
 
-Exercises beforeRegisterNodeDef + getCustomWidgets + addDOMWidget, rather
+Exercises addCustomNodeDefs + getCustomWidgets + addDOMWidget, rather
 than calling the highlighter against a manually supplied textarea.
 Does not claim a live ComfyUI server integration.
 """
@@ -37,10 +37,10 @@ body.light #panel { background:#e3e3e3; }
 const constructors = {};
 const app = { registerExtension(extension) { window.extension = extension; } };
 __JS__
-window.def = { name:'NorthmereInstruments.DynamicPrompt', input:{ required:{ template:['STRING',{multiline:true,default:__SAMPLE__}], seed:['INT',{default:0}]}}};
+window.def = { name:'UnknownV3FrontendName', input:{ required:{ template:['STRING',{multiline:true,default:__SAMPLE__}], seed:['INT',{default:0}]}}};
 window.unrelated = { name:'OtherNode',input:{required:{template:['STRING',{multiline:true}]}}};
-window.extension.beforeRegisterNodeDef({},window.def);
-window.extension.beforeRegisterNodeDef({},window.unrelated);
+window.extension.addCustomNodeDefs({'NorthmereInstruments.DynamicPrompt':window.def});
+window.extension.addCustomNodeDefs({'OtherNode':window.unrelated});
 Object.assign(constructors,window.extension.getCustomWidgets());
 window.node = {
     size:[440,215],

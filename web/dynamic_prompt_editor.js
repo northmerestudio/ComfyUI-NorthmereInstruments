@@ -65,7 +65,7 @@ function render(source, target) {
 }
 
 function createEditor(node, name, inputData) {
-  const opts = inputData?.[1] ?? {};
+  const opts = Array.isArray(inputData) ? (inputData[1] ?? {}) : (inputData?.options ?? inputData ?? {});
   const root = document.createElement('div');
   root.className = 'nmi-prompt-editor';
   root.dataset.mode = 'dark';
@@ -131,6 +131,7 @@ function createEditor(node, name, inputData) {
     hideOnZoom: true,
   };
   const widget = node.addDOMWidget(name, 'customtext', root, options);
+  widget.options ??= {};
   widget.options.minNodeSize = [360, 215];
   const resize = new ResizeObserver(() => { syncGeometry(); syncTheme(); });
   resize.observe(root);
@@ -145,17 +146,44 @@ function createEditor(node, name, inputData) {
   return { widget, minWidth:360, minHeight:215 };
 }
 
+// V3 node definitions are not guaranteed to use the legacy nodeData.name shape.
+// Apply the renderer selection BEFORE node registration, when definitions are
+// still mutable. The STRING socket type and backend execution stay unchanged.
+function patchDefinition(def, key) {
+  if (!def || ![NODE_ID, 'Northmere Prompt v3'].includes(key) &&
+      ![NODE_ID, 'Northmere Prompt v3'].includes(def.name) &&
+      ![NODE_ID, 'Northmere Prompt v3'].includes(def.node_id) &&
+      ![NODE_ID, 'Northmere Prompt v3'].includes(def.display_name)) return false;
+  let changed = false;
+  const input = def.input;
+  for (const section of [input?.required, input?.optional]) {
+    const spec = section?.template;
+    if (Array.isArray(spec) && spec[0] === 'STRING') {
+      spec[1] ??= {};
+      spec[1].widgetType = WIDGET_TYPE;
+      changed = true;
+    }
+  }
+  // Some V3 definitions expose an inputs array prior to legacy conversion.
+  for (const spec of def.inputs ?? []) {
+    if (spec?.name === 'template' && (spec.type === 'STRING' || spec.type === 'string')) {
+      spec.widgetType = WIDGET_TYPE;
+      spec.widget_type = WIDGET_TYPE;
+      changed = true;
+    }
+  }
+  return changed;
+}
+
 app.registerExtension({
   name: 'NorthmereInstruments.DynamicPromptEditor',
   getCustomWidgets() {
     return { [WIDGET_TYPE]: createEditor };
   },
+  addCustomNodeDefs(defs) {
+    for (const [key, def] of Object.entries(defs)) patchDefinition(def, key);
+  },
   beforeRegisterNodeDef(_nodeType, nodeData) {
-    if (nodeData.name !== NODE_ID) return;
-    const spec = nodeData.input?.required?.template ?? nodeData.input?.optional?.template;
-    if (Array.isArray(spec) && spec[0] === 'STRING') {
-      spec[1] ??= {};
-      spec[1].widgetType = WIDGET_TYPE;
-    }
+    patchDefinition(nodeData);
   },
 });
