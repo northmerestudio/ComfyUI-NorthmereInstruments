@@ -20,6 +20,7 @@ def main():
     </style></head><body><div id="mount"></div><script>
     window.app = {{registerExtension(ext) {{ window.ext = ext; }} }};
     {JS}
+    document.addEventListener('wheel', () => window.canvasWheels = (window.canvasWheels || 0) + 1);
     window.node = {{graph:{{change() {{window.changed = (window.changed || 0) + 1;}}}},
        setDirtyCanvas() {{}}, addDOMWidget(name, type, root, options) {{
          document.getElementById('mount').append(root);
@@ -54,6 +55,30 @@ def main():
             page.evaluate('(v) => node.widget.setValue(v)', '\n'.join([PROMPT]*20))
             page.locator('textarea').evaluate('(e) => {e.scrollTop=100;e.dispatchEvent(new Event("scroll"));}')
             assert '-100px' in page.locator('.nmi-prompt-highlight').evaluate('(e) => e.style.transform')
+            # Real wheel input stays in the textarea; ComfyUI canvas must not receive it.
+            page.locator('textarea').hover()
+            page.mouse.wheel(0, 125)
+            page.wait_for_timeout(80)
+            assert page.locator('textarea').evaluate('(e) => e.scrollTop') > 0
+            assert page.evaluate('window.canvasWheels || 0') == 0
+            # Long unwrapped lines must scroll horizontally, and the mirror tracks both axes.
+            page.evaluate('(v) => node.widget.setValue(v)', ('x' * 180) + '\n' + ('line\n' * 45))
+            assert page.locator('textarea').evaluate('(e) => e.scrollWidth > e.clientWidth')
+            assert page.locator('textarea').evaluate('(e) => getComputedStyle(e).whiteSpace') == 'pre'
+            page.locator('textarea').evaluate('(e) => { e.scrollLeft = 160; e.dispatchEvent(new Event("scroll")); }')
+            assert '-160px' in page.locator('.nmi-prompt-highlight').evaluate('(e) => e.style.transform')
+            page.locator('textarea').hover()
+            page.mouse.wheel(85, 0)
+            page.wait_for_timeout(80)
+            assert page.locator('textarea').evaluate('(e) => e.scrollLeft') > 160
+            assert page.evaluate('window.canvasWheels || 0') == 0
+            # Tab indentation keeps focus and updates the serialized widget value.
+            page.evaluate('(v) => node.widget.setValue(v)', 'hello')
+            page.locator('textarea').focus()
+            page.locator('textarea').evaluate('(e) => e.setSelectionRange(0, 0)')
+            page.locator('textarea').press('Tab')
+            assert page.evaluate('node.widget.getValue()') == '    hello'
+            assert page.evaluate('document.activeElement.classList.contains("nmi-prompt-input")')
             # Basic visual parity: mirror and textarea have identical font and padding.
             assert page.evaluate('''() => {
                 const a=getComputedStyle(document.querySelector('textarea'));
@@ -64,6 +89,6 @@ def main():
             assert not errors, errors
             page.close()
         browser.close()
-    print('PASS: widget registration, DOM rendering, themes, editing, restore, tokens, escaping, scrolling')
+    print('PASS: registration, themes, editing, restore, wheel isolation, horizontal scroll, mirror sync, Tab indentation')
 
 if __name__ == '__main__': main()

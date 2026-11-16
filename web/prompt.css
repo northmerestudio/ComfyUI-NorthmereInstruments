@@ -34,13 +34,13 @@
 .nmi-prompt-highlight, .nmi-prompt-input {
   box-sizing: border-box; margin: 0; padding: 10px 12px;
   width: 100%; font: 12.5px/1.5 ui-monospace, SFMono-Regular, Consolas, 'Liberation Mono', monospace;
-  letter-spacing: 0; tab-size: 4; white-space: pre-wrap; overflow-wrap: break-word;
+  letter-spacing: 0; tab-size: 4; white-space: pre; overflow-wrap: normal;
 }
 .nmi-prompt-highlight { position: absolute; inset: 0; width: 100%; min-height: 100%; color: var(--nmi-ink); }
 .nmi-prompt-input { position: absolute; inset: 0; height: 100%; resize: none;
   background: transparent !important; border: 0; outline: none;
   color: transparent !important; -webkit-text-fill-color: transparent; caret-color: var(--nmi-ink);
-  overflow: auto; scrollbar-width: thin; }
+  overflow-x: auto; overflow-y: auto; scrollbar-width: thin; }
 .nmi-prompt-input::placeholder { color: var(--nmi-ink); -webkit-text-fill-color: var(--nmi-ink); opacity: .5; }
 .nmi-prompt-input::selection { background: rgba(119,151,215,.35); }
 .nmi-prompt-surface:focus-within { outline: 1px solid var(--nmi-directive); outline-offset: -1px; }

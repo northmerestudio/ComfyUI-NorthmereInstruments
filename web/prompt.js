@@ -63,6 +63,8 @@ function createPromptEditor(node, inputName) {
 
   const surface = document.createElement('div');
   surface.className = 'nmi-prompt-surface';
+  // ComfyUI's DOM canvas forwards uncaptured wheel events to canvas zoom.
+  surface.setAttribute('data-capture-wheel', 'true');
   const mirror = document.createElement('div');
   mirror.className = 'nmi-prompt-mirror';
   mirror.setAttribute('aria-hidden', 'true');
@@ -72,6 +74,7 @@ function createPromptEditor(node, inputName) {
   const textarea = document.createElement('textarea');
   textarea.className = 'nmi-prompt-input';
   textarea.spellcheck = false;
+  textarea.wrap = 'off';
   textarea.autocapitalize = 'off';
   textarea.autocomplete = 'off';
   textarea.setAttribute('aria-label', 'Northmere prompt template');
@@ -102,6 +105,15 @@ function createPromptEditor(node, inputName) {
     node.setDirtyCanvas?.(true, true);
   });
   textarea.addEventListener('scroll', syncScroll, { passive: true });
+  // Keep wheel scrolling native (including trackpad horizontal scroll), not canvas zoom.
+  surface.addEventListener('wheel', (event) => event.stopPropagation(), { passive: true });
+  // Tab inserts indentation rather than moving focus away from the code editor.
+  textarea.addEventListener('keydown', (event) => {
+    if (event.key !== 'Tab' || event.ctrlKey || event.metaKey || event.altKey || event.shiftKey) return;
+    event.preventDefault();
+    textarea.setRangeText('    ', textarea.selectionStart, textarea.selectionEnd, 'end');
+    textarea.dispatchEvent(new Event('input', { bubbles: true }));
+  });
   // Escape remains an editable native text field, including IME/undo/selection.
   widget = node.addDOMWidget(inputName, 'NORTHMERE_INSTRUMENTS_PROMPT', root, {
     getValue: () => textarea.value,
