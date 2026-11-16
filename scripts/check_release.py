@@ -28,6 +28,7 @@ REQUIRED = {
     'northmere_instruments/envelope.py',
     'web/curve.js',
     'web/curve.css',
+    'web/dynamic_prompt_editor.js',
 }
 
 
@@ -70,8 +71,11 @@ def verify_release(archive: Path, *, browser: bool = False) -> None:
         run_checked(['node', 'tests/ui_smoke.cjs'], root)
         run_checked(['node', '--input-type=module', '--check'], root,
                     input_data=(root / 'web/curve.js').read_text(encoding='utf-8'))
+        run_checked(['node', '--input-type=module', '--check'], root,
+                    input_data=(root / 'web/dynamic_prompt_editor.js').read_text(encoding='utf-8'))
         if browser:
             run_checked([sys.executable, 'tests/browser_smoke.py'], root)
+            run_checked([sys.executable, 'tests/dynamic_prompt_editor_browser.py'], root)
         print(f'PASS: release archive {archive.name} verified after fresh extraction')
         if not browser:
             print('NOTE: pass --browser to also run the standalone Chromium editor check.')
