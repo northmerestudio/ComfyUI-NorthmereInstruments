@@ -37,8 +37,18 @@ function paint(source, target) {
 function attach(widget) {
   const textarea = widget?.element ?? widget?.inputEl;
   if (!(textarea instanceof HTMLTextAreaElement) || textarea.dataset.nmiPromptHighlight) return;
+  // ComfyUI may create the widget before Vue mounts its textarea into the DOM.
+  // The previous one-shot parent check silently skipped highlighting forever.
+  if (!textarea.isConnected || !textarea.parentElement) {
+    const mounted = new MutationObserver(() => {
+      if (!textarea.isConnected || !textarea.parentElement) return;
+      mounted.disconnect();
+      attach(widget);
+    });
+    mounted.observe(document.documentElement, { childList: true, subtree: true });
+    return;
+  }
   const parent = textarea.parentElement;
-  if (!parent) return;
   const originalCSS = getComputedStyle(textarea);
   const originalColor = originalCSS.color;
   textarea.dataset.nmiPromptHighlight = 'true';
