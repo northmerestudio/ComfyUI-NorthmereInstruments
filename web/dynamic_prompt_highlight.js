@@ -8,7 +8,7 @@ if (!document.getElementById(STYLE_ID)) {
   const link = document.createElement('link');
   link.id = STYLE_ID;
   link.rel = 'stylesheet';
-  link.href = new URL('./dynamic_prompt_highlight.css', import.meta.url).href;
+  link.href = new URL('./dynamic_prompt_highlight.css?v=3', import.meta.url).href;
   document.head.append(link);
 }
 
@@ -35,7 +35,9 @@ function paint(source, target) {
 }
 
 function attach(widget) {
-  const textarea = widget?.element ?? widget?.inputEl;
+  const element = widget?.element ?? widget?.inputEl;
+  const textarea = element instanceof HTMLTextAreaElement ? element
+    : element?.querySelector?.('textarea');
   if (!(textarea instanceof HTMLTextAreaElement) || textarea.dataset.nmiPromptHighlight) return;
   // ComfyUI may create the widget before Vue mounts its textarea into the DOM.
   // The previous one-shot parent check silently skipped highlighting forever.
@@ -127,11 +129,38 @@ function attach(widget) {
   disconnect.observe(parent.parentElement ?? parent, { childList: true, subtree: true });
 }
 
+// Depending on frontend version, nodeCreated can precede creation of its
+// native widgets. A one-shot lookup silently fails on those versions.
+const pending = new WeakSet();
+function attachNode(node) {
+  if (!node || pending.has(node)) return;
+  if (![node.comfyClass, node.constructor?.comfyClass, node.type].includes(NODE_ID)) return;
+  pending.add(node);
+  let attempts = 0;
+  function check() {
+    const widget = node.widgets?.find((item) => item.name === 'template');
+    const input = widget?.element ?? widget?.inputEl;
+    if (input && (input instanceof HTMLTextAreaElement || input.querySelector?.('textarea'))) {
+      pending.delete(node);
+      attach(widget);
+      return;
+    }
+    // Includes async/Vue widget construction and graph restoration; bounded so
+    // removed nodes never retain an unbounded polling loop.
+    if (++attempts < 600) requestAnimationFrame(check);
+    else {
+      pending.delete(node);
+      console.warn('[Northmere] Prompt syntax highlighting: template textarea not found', node);
+    }
+  }
+  check();
+}
 app.registerExtension({
   name: 'NorthmereInstruments.DynamicPromptHighlight',
-  nodeCreated(node) {
-    if (node.comfyClass !== NODE_ID) return;
-    const widget = node.widgets?.find((item) => item.name === 'template');
-    if (widget) attach(widget);
+  nodeCreated: attachNode,
+  loadedGraphNode: attachNode,
+  setup() {
+    // Existing graph nodes when a frontend dynamically loads the extension.
+    for (const node of app.graph?._nodes ?? []) attachNode(node);
   },
 });
