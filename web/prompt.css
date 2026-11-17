@@ -8,22 +8,30 @@
   --nmi-label: #8ed6b4;
   --nmi-operator: #efa8a8;
   --nmi-escape: #b4b9c6;
-  --nmi-comment: #a4adbb;
+  --nmi-comment: #8491a5;
+  --nmi-function: #e8cf88;
+  --nmi-variable: #82c7e7;
+  --nmi-reference: #70d4ce;
+  --nmi-condition: #c59bff;
+  --nmi-type: #4ed9b0;
+  --nmi-string: #ceae83;
+  --nmi-number: #c5d98e;
+  --nmi-boolean: #eaa6c9;
   display: flex; flex-direction: column; width: 100%; height: 100%; min-height: 230px;
   color: var(--nmi-ink); font-family: inherit; box-sizing: border-box;
 }
 @media (prefers-color-scheme: light) {
   .nmi-prompt { --nmi-surface: #f8fafc; --nmi-ink: #242930; --nmi-directive: #225eb2; --nmi-delimiter: #7e399b;
-    --nmi-weight: #97520e; --nmi-label: #146e50; --nmi-operator: #af3c50; --nmi-escape: #676c77; --nmi-comment: #687483; }
+    --nmi-weight: #97520e; --nmi-label: #146e50; --nmi-operator: #af3c50; --nmi-escape: #676c77; --nmi-comment: #687483; --nmi-function: #865400; --nmi-variable: #17698b; --nmi-reference: #096d6c; --nmi-condition: #843bac; --nmi-type: #08785a; --nmi-string: #996027; --nmi-number: #577016; --nmi-boolean: #a52d6e; }
 }
 /* ComfyUI theme classes override OS preference when the app forces a theme. */
 :where(.light-theme, .comfy-theme-light, [data-theme='light']) .nmi-prompt {
   --nmi-surface: #f8fafc; --nmi-ink: #242930; --nmi-directive: #225eb2; --nmi-delimiter: #7e399b;
-  --nmi-weight: #97520e; --nmi-label: #146e50; --nmi-operator: #af3c50; --nmi-escape: #676c77; --nmi-comment: #687483;
+  --nmi-weight: #97520e; --nmi-label: #146e50; --nmi-operator: #af3c50; --nmi-escape: #676c77; --nmi-comment: #687483; --nmi-function: #865400; --nmi-variable: #17698b; --nmi-reference: #096d6c; --nmi-condition: #843bac; --nmi-type: #08785a; --nmi-string: #996027; --nmi-number: #577016; --nmi-boolean: #a52d6e;
 }
 :where(.dark-theme, .comfy-theme-dark, [data-theme='dark']) .nmi-prompt {
   --nmi-surface: #292b30; --nmi-ink: #e6e6e6; --nmi-directive: #83b7ff; --nmi-delimiter: #d7a0f5;
-  --nmi-weight: #f4bd78; --nmi-label: #8ed6b4; --nmi-operator: #efa8a8; --nmi-escape: #b4b9c6; --nmi-comment: #a4adbb;
+  --nmi-weight: #f4bd78; --nmi-label: #8ed6b4; --nmi-operator: #efa8a8; --nmi-escape: #b4b9c6; --nmi-comment: #8491a5; --nmi-function: #e8cf88; --nmi-variable: #82c7e7; --nmi-reference: #70d4ce; --nmi-condition: #c59bff; --nmi-type: #4ed9b0; --nmi-string: #ceae83; --nmi-number: #c5d98e; --nmi-boolean: #eaa6c9;
 }
 .nmi-prompt-header { display: flex; justify-content: space-between; align-items: center;
   padding: 3px 5px 7px; font-size: 11px; opacity: .85; }
@@ -53,3 +61,12 @@
 .nmi-prompt-escape { color: var(--nmi-escape); }
 
 .nmi-prompt-comment { color: var(--nmi-comment); font-style: italic; }
+
+.nmi-prompt-function { color: var(--nmi-function); font-weight: 600; }
+.nmi-prompt-variable { color: var(--nmi-variable); }
+.nmi-prompt-reference { color: var(--nmi-reference); }
+.nmi-prompt-condition { color: var(--nmi-condition); }
+.nmi-prompt-type { color: var(--nmi-type); }
+.nmi-prompt-string { color: var(--nmi-string); }
+.nmi-prompt-number { color: var(--nmi-number); }
+.nmi-prompt-boolean { color: var(--nmi-boolean); }

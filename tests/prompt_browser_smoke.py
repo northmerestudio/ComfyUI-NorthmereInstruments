@@ -49,12 +49,30 @@ def main():
             assert page.locator('.nmi-prompt-comment').count() == 1
             assert page.locator('.nmi-prompt-comment').inner_text() == '// A comment about this prompt'
             assert page.evaluate('getComputedStyle(document.querySelector(".nmi-prompt-comment")).color') != page.evaluate('getComputedStyle(document.querySelector(".nmi-prompt")).color')
-            assert page.locator('.nmi-prompt-directive').count() >= 5
+            assert page.locator('.nmi-prompt-directive').count() >= 4
             assert page.locator('.nmi-prompt-delimiter').count() >= 4
             assert page.locator('.nmi-prompt-weight').count() == 1
             assert page.locator('.nmi-prompt-label').count() >= 1
             assert page.locator('.nmi-prompt-operator').count() >= 2
             assert page.locator('.nmi-prompt-escape').count() == 2
+            # Typed declarations, function calls, builtins and computed expressions use distinct IDE tokens.
+            program = '''const subject: text = "sks"
+fn camera.faces(count: int = 1) = ${upper("hidden") if count > 1 else "visible"}
+let scene = {day => bright | night => dark}
+$camera.faces(2) $subject ?scene.day{outside} @3
+'''
+            page.evaluate('(v) => node.widget.setValue(v)', program)
+            kinds = page.evaluate('''(source) => tokens(source).map(t => [t.kind, t.value])''', program)
+            assert ''.join(value for _, value in kinds) == program
+            for kind in ('directive', 'function', 'variable', 'reference', 'condition',
+                         'type', 'string', 'number', 'operator', 'label'):
+                assert kind in {kind for kind, _ in kinds}, (kind, kinds)
+            for kind in ('function', 'variable', 'reference', 'condition', 'type', 'string', 'number'):
+                assert page.locator(f'.nmi-prompt-{kind}').count() > 0
+                color = page.locator(f'.nmi-prompt-{kind}').first.evaluate('(e) => getComputedStyle(e).color')
+                base = page.locator('.nmi-prompt').evaluate('(e) => getComputedStyle(e).color')
+                assert color != base, (theme, kind)
+            page.evaluate('(v) => node.widget.setValue(v)', PROMPT)
             assert page.locator('.nmi-prompt').count() == 1
             assert page.evaluate('getComputedStyle(document.querySelector(".nmi-prompt-directive")).color') != page.evaluate('getComputedStyle(document.querySelector(".nmi-prompt")).color')
             page.locator('textarea').fill(PROMPT + '\n<script>alert(1)</script>')

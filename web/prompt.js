@@ -10,6 +10,10 @@ document.head.append(stylesheet);
 const IDENT = /^[A-Za-z][A-Za-z0-9_]*(?:\.[A-Za-z][A-Za-z0-9_]*)*/;
 const KEYWORD = /^(choose|let|const|fn|require|prefer)\b/;
 const WEIGHT = /^@(?:\d+(?:\.\d+)?)/;
+const NUMBER = /^\d+(?:\.\d+)?\b/;
+const BUILTIN = /^(?:upper|lower|title|str|int|float|bool|len|abs|min|max|round)\b/;
+const TYPE = /^(?:text|int|float|bool)\b/;
+const EXPRESSION_KEYWORD = /^(?:if|else|and|or|not)\b/;
 
 // Highlighting is deliberately forgiving. The Python parser is authoritative.
 // Return alternating tokens with the same total text to avoid caret/mirror drift.
@@ -18,6 +22,7 @@ export function tokens(source) {
   let i = 0;
   let header = true;
   let headerDepth = 0;
+  let expressionDepth = 0;
   const emit = (kind, value) => {
     if (out.length && out[out.length - 1].kind === kind) out[out.length - 1].value += value;
     else out.push({ kind, value });
@@ -39,23 +44,58 @@ export function tokens(source) {
       const keyword = rest.match(KEYWORD);
       if (keyword) { emit('directive', keyword[0]); i += keyword[0].length; continue; }
     }
+    const linePrefix = source.slice(source.lastIndexOf('\n', i - 1) + 1, i);
+    if (header && /^(?:[ \t]*)(?:choose|let|const|fn)[ \t]+$/.test(linePrefix)) {
+      const name = rest.match(IDENT);
+      if (name) { emit(linePrefix.trim() === 'fn' ? 'function' : 'variable', name[0]); i += name[0].length; continue; }
+    }
+    if (header && /^[ \t]*fn[ \t]+[A-Za-z][\w.]*[ \t]*\([^\n]*[,(][ \t]*$/.test(linePrefix)) {
+      const argument = rest.match(/^[A-Za-z][A-Za-z0-9_]*(?=[ \t]*:)/);
+      if (argument) { emit('variable', argument[0]); i += argument[0].length; continue; }
+    }
+    if (header && /:[ \t]*$/.test(linePrefix)) {
+      const type = rest.match(TYPE);
+      if (type) { emit('type', type[0]); i += type[0].length; continue; }
+    }
+    {
+      const string = rest.match(/^(?:"(?:[^"\\]|\\.)*"|'(?:[^'\\]|\\.)*')/);
+      if (string) { emit('string', string[0]); i += string[0].length; continue; }
+      const number = (header || expressionDepth) && rest.match(NUMBER);
+      if (number) { emit('number', number[0]); i += number[0].length; continue; }
+      if ((header || expressionDepth) && /^(?:true|false|True|False)\b/.test(rest)) {
+        const value = rest.match(/^(?:true|false|True|False)\b/)[0];
+        emit('boolean', value); i += value.length; continue;
+      }
+    }
+    if (expressionDepth && EXPRESSION_KEYWORD.test(rest)) {
+      const keyword = rest.match(EXPRESSION_KEYWORD)[0];
+      emit('directive', keyword); i += keyword.length; continue;
+    }
+    if (expressionDepth && BUILTIN.test(rest) && /^[ \t]*\(/.test(rest.slice(rest.match(BUILTIN)[0].length))) {
+      const name = rest.match(BUILTIN)[0];
+      emit('function', name); i += name.length; continue;
+    }
     if (rest.startsWith('=>') || rest.startsWith('->')) {
       emit('operator', rest.slice(0, 2)); i += 2; continue;
     }
-    if (rest.startsWith('${')) { emit('directive', '${'); i += 2; continue; }
+    if (rest.startsWith('${')) { expressionDepth++; emit('delimiter', '${'); i += 2; continue; }
     if (rest[0] === '$' || rest[0] === '?') {
       const name = rest.slice(1).match(IDENT);
       if (name && (rest[0] === '$' || rest[1 + name[0].length] === '{')) {
-        emit('directive', rest[0] + name[0]); i += 1 + name[0].length; continue;
+        const isFunction = rest[0] === '$' && /^[ \t]*\(/.test(rest.slice(1 + name[0].length));
+        emit(rest[0] === '?' ? 'condition' : isFunction ? 'function' : 'reference', rest[0] + name[0]);
+        i += 1 + name[0].length; continue;
       }
     }
     const weight = rest.match(WEIGHT);
     if (weight && i > 0 && /\s/.test(source[i - 1])) {
       emit('weight', weight[0]); i += weight[0].length; continue;
     }
-    if ('{}|&!()'.includes(rest[0])) {
+    if (rest[0] === '=') { emit('operator', '='); i++; continue; }
+    if ('{}|&!():,+-*/'.includes(rest[0])) {
       if (header && rest[0] === '{') headerDepth++;
       if (header && rest[0] === '}') headerDepth = Math.max(0, headerDepth - 1);
+      if (rest[0] === '}' && expressionDepth) expressionDepth--;
       emit('delimiter', rest[0]); i++; continue;
     }
     const tag = rest.match(/^([A-Za-z][A-Za-z0-9_]*(?:\s*,\s*[A-Za-z][A-Za-z0-9_]*)*|_)(?=\s*=>)/);
