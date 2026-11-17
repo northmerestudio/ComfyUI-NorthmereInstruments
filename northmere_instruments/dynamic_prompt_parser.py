@@ -1,8 +1,10 @@
 """Prompt language parsing, validation, and bounded exact semantics."""
 from __future__ import annotations
 
+import ast
 import hashlib
 import itertools
+import operator
 import re
 from dataclasses import dataclass
 from fractions import Fraction
@@ -27,6 +29,26 @@ class Ref:
     name: str
 
 @dataclass(frozen=True)
+class Computed:
+    expression: str
+
+@dataclass(frozen=True)
+class Call:
+    name: str
+    args: tuple[str, ...]
+
+@dataclass(frozen=True)
+class Parameter:
+    name: str
+    kind: str
+    default: str | None
+
+@dataclass(frozen=True)
+class Function:
+    params: tuple[Parameter, ...]
+    body: tuple[Node, ...]
+
+@dataclass(frozen=True)
 class Conditional:
     condition: str
     children: tuple[Node, ...]
@@ -42,7 +64,7 @@ class Choice:
     branches: tuple[Branch, ...]
 
 
-Node: TypeAlias = Text | Ref | Conditional | Choice
+Node: TypeAlias = Text | Ref | Call | Computed | Conditional | Choice
 Expression: TypeAlias = (
     tuple[Literal['name'], str]
     | tuple[Literal['not'], 'Expression']
@@ -51,6 +73,70 @@ Expression: TypeAlias = (
 Fragment: TypeAlias = str | tuple[Literal['if'], str, tuple['Fragment', ...]]
 Derivation: TypeAlias = tuple[tuple[Fragment, ...], frozenset[str], Fraction]
 Outcome: TypeAlias = tuple[str, frozenset[str], Fraction]
+
+def split_args(source: str) -> tuple[str, ...]:
+    """Split a call or signature without splitting quoted or nested commas."""
+    if not source.strip():
+        return ()
+    args = []
+    start = 0
+    depth = 0
+    quote = ''
+    escaped = False
+    for i, char in enumerate(source):
+        if escaped:
+            escaped = False
+            continue
+        if char == '\\' and quote:
+            escaped = True
+            continue
+        if quote:
+            if char == quote:
+                quote = ''
+            continue
+        if char in '\"\'':
+            quote = char
+        elif char == '(':
+            depth += 1
+        elif char == ')':
+            depth -= 1
+            if depth < 0:
+                raise LanguageError('unbalanced function arguments')
+        elif char == ',' and depth == 0:
+            args.append(source[start:i].strip())
+            start = i + 1
+    if quote or depth:
+        raise LanguageError('unclosed function arguments')
+    args.append(source[start:].strip())
+    if not all(args):
+        raise LanguageError('empty function argument')
+    return tuple(args)
+
+
+def read_call(source: str, start: int) -> tuple[tuple[str, ...], int]:
+    """Read the balanced parentheses of a call, preserving argument source."""
+    depth = 0
+    quote = ''
+    escaped = False
+    for i in range(start, len(source)):
+        char = source[i]
+        if escaped:
+            escaped = False
+        elif char == '\\' and quote:
+            escaped = True
+        elif quote:
+            if char == quote:
+                quote = ''
+        elif char in '\"\'':
+            quote = char
+        elif char == '(':
+            depth += 1
+        elif char == ')':
+            depth -= 1
+            if depth == 0:
+                return split_args(source[start + 1:i]), i + 1
+    raise LanguageError('unclosed function call')
+
 
 class Reader:
     """Read nested prompt expressions into immutable syntax nodes."""
@@ -84,12 +170,25 @@ class Reader:
                 parts.append(self.choice())
                 continue
             if c == '$':
+                if self.data.startswith('${', self.pos):
+                    end = self.data.find('}', self.pos + 2)
+                    if end < 0:
+                        raise LanguageError('unclosed computed expression')
+                    flush()
+                    parts.append(Computed(self.data[self.pos + 2:end].strip()))
+                    self.pos = end + 1
+                    continue
                 m = re.match(PATH, self.data[self.pos + 1:])
                 if not m:
                     raise LanguageError('invalid template reference')
                 flush()
-                parts.append(Ref(m.group()))
-                self.pos += 1 + len(m.group())
+                name = m.group()
+                self.pos += 1 + len(name)
+                if self.pos < len(self.data) and self.data[self.pos] == '(':
+                    args, self.pos = read_call(self.data, self.pos)
+                    parts.append(Call(name, args))
+                else:
+                    parts.append(Ref(name))
                 continue
             if c == '?':
                 m = re.match(PATH, self.data[self.pos + 1:])
@@ -237,6 +336,8 @@ class Program:
     decisions: dict[str, list[tuple[str, Fraction]]]
     requirements: list[tuple[Expression, Expression]]
     preferences: list[tuple[Expression, Fraction]]
+    functions: dict[str, Function] | None = None
+    constants: dict[str, object] | None = None
 
 def parse(source: str) -> Program:
     """Parse and validate an entire prompt, including its optional header."""
@@ -244,6 +345,8 @@ def parse(source: str) -> Program:
     decisions: dict[str, list[tuple[str, Fraction]]] = {}
     requirements: list[tuple[Expression, Expression]] = []
     preferences: list[tuple[Expression, Fraction]] = []
+    functions: dict[str, Function] = {}
+    constants: dict[str, object] = {}
     body = source
     # Tolerate paste-related whitespace/BOM before a header, but do not
     # change whitespace in ordinary prompts that have no header.
@@ -272,17 +375,42 @@ def parse(source: str) -> Program:
         if cur or depth:
             raise LanguageError('unclosed header statement')
         for st in statements:
+            m = re.fullmatch(f'const\\s+({PATH})\\s*:\\s*(text|int|float|bool)\\s*=\\s*(.+)', st, re.S)
+            if m:
+                name, kind, value = m.groups()
+                if name in templates or name in functions or name in decisions or name in constants:
+                    raise LanguageError('duplicate declaration')
+                constants[name] = read_value(value, kind)
+                continue
+            m = re.fullmatch(f'fn\\s+({PATH})\\s*\\((.*?)\\)\\s*=\\s*(.*)', st, re.S)
+            if m:
+                name, signature, definition = m.groups()
+                if name in templates or name in decisions or name in functions or name in constants or name.split('.')[0] in decisions:
+                    raise LanguageError('duplicate declaration')
+                params = []
+                for raw in split_args(signature):
+                    item = re.fullmatch(f'({ID})\\s*:\\s*(text|int|float|bool)(?:\\s*=\\s*(.+))?', raw, re.S)
+                    if not item:
+                        raise LanguageError('invalid function parameter')
+                    param, kind, default = item.groups()
+                    if param in (p.name for p in params):
+                        raise LanguageError('duplicate function parameter')
+                    if default is not None:
+                        read_value(default, kind)
+                    params.append(Parameter(param, kind, default))
+                functions[name] = Function(tuple(params), Reader(definition).parse())
+                continue
             m = re.fullmatch(f'let\\s+({PATH})\\s*=\\s*(.*)', st, re.S)
             if m:
                 name, definition = m.groups()
-                if name in templates or name in decisions or name.split('.')[0] in decisions:
+                if name in templates or name in decisions or name in functions or name in constants or name.split('.')[0] in decisions:
                     raise LanguageError('duplicate declaration')
                 templates[name] = Reader(definition).parse()
                 continue
             m = re.fullmatch(f'choose\\s+({ID})\\s*=\\s*\\{{(.*)\\}}', st, re.S)
             if m:
                 name, parts = m.groups()
-                if name in templates or name in decisions or any((k.split('.')[0] == name for k in templates)):
+                if name in templates or name in decisions or name in functions or name in constants or any((k.split('.')[0] == name for k in templates)):
                     raise LanguageError('duplicate declaration')
                 variants = []
                 for raw in parts.split('|'):
@@ -311,9 +439,180 @@ def parse(source: str) -> Program:
             raise LanguageError(f'unknown header statement: {st[:45]}')
     body = ''.join((line for line in body.splitlines(keepends=True) if not line.lstrip().startswith('//')))
     parsed = Reader(body).parse()
-    p = Program(parsed, templates, decisions, requirements, preferences)
+    p = Program(parsed, templates, decisions, requirements, preferences, functions, constants)
+    compile_functions(p)
     validate(p)
     return p
+
+
+def read_value(source: str, kind: str) -> object:
+    """Only literal data is executable as a function argument."""
+    try:
+        value = ast.literal_eval(source)
+    except (ValueError, SyntaxError, TypeError, MemoryError, RecursionError) as e:
+        raise LanguageError('function arguments must be typed literals or $references') from e
+    if kind == 'text' and type(value) is str:
+        return value
+    if kind == 'int' and type(value) is int:
+        return value
+    if kind == 'float' and type(value) in (float, int):
+        return value
+    if kind == 'bool' and type(value) is bool:
+        return value
+    raise LanguageError(f'function argument must have type {kind}')
+
+
+def evaluate(source: str, variables: dict[str, object]) -> object:
+    """Evaluate bounded, side-effect-free expressions with no Python object access."""
+    binary = {ast.Add: operator.add, ast.Sub: operator.sub, ast.Mult: operator.mul,
+              ast.Div: operator.truediv, ast.FloorDiv: operator.floordiv, ast.Mod: operator.mod}
+    compare = {ast.Eq: operator.eq, ast.NotEq: operator.ne, ast.Lt: operator.lt,
+               ast.LtE: operator.le, ast.Gt: operator.gt, ast.GtE: operator.ge}
+    builtins = {'upper': str.upper, 'lower': str.lower, 'title': str.title,
+                'len': len, 'str': str, 'int': int, 'float': float,
+                'abs': abs, 'round': round, 'min': min, 'max': max}
+    try:
+        tree = ast.parse(source, mode='eval')
+    except SyntaxError as e:
+        raise LanguageError('invalid computed expression') from e
+    count = [0]
+
+    def visit(node: ast.AST) -> object:
+        count[0] += 1
+        if count[0] > 300:
+            raise LanguageError('computed expression too complex')
+        if isinstance(node, ast.Constant) and type(node.value) in (str, int, float, bool):
+            return node.value
+        if isinstance(node, ast.Name):
+            if node.id not in variables:
+                raise LanguageError(f'unknown expression variable: {node.id}')
+            return variables[node.id]
+        if isinstance(node, ast.UnaryOp) and isinstance(node.op, (ast.USub, ast.UAdd, ast.Not)):
+            value = visit(node.operand)
+            if isinstance(node.op, ast.Not):
+                return not value
+            if type(value) not in (int, float):
+                raise LanguageError('unary arithmetic requires a number')
+            return -value if isinstance(node.op, ast.USub) else +value
+        if isinstance(node, ast.BinOp) and type(node.op) in binary:
+            left, right = visit(node.left), visit(node.right)
+            if type(left) not in (str, int, float) or type(right) not in (str, int, float):
+                raise LanguageError('invalid computed operands')
+            if len(str(left)) + len(str(right)) > 10000:
+                raise LanguageError('computed expression too large')
+            if isinstance(node.op, ast.Mult) and ((type(left) is str and type(right) is int) or
+                                                  (type(right) is str and type(left) is int)):
+                if max(left if type(left) is int else right, 0) * len(left if type(left) is str else right) > 100000:
+                    raise LanguageError('computed expression too large')
+            try:
+                return binary[type(node.op)](left, right)
+            except (ValueError, ZeroDivisionError, OverflowError, TypeError) as e:
+                raise LanguageError('invalid computed arithmetic') from e
+        if isinstance(node, ast.BoolOp) and isinstance(node.op, (ast.And, ast.Or)):
+            values = [bool(visit(v)) for v in node.values]
+            return all(values) if isinstance(node.op, ast.And) else any(values)
+        if isinstance(node, ast.Compare):
+            left = visit(node.left)
+            for op, right_node in zip(node.ops, node.comparators):
+                right = visit(right_node)
+                if type(op) not in compare:
+                    raise LanguageError('unsupported comparison')
+                try:
+                    valid = compare[type(op)](left, right)
+                except TypeError as e:
+                    raise LanguageError('invalid comparison operands') from e
+                if not valid:
+                    return False
+                left = right
+            return True
+        if isinstance(node, ast.IfExp):
+            return visit(node.body if visit(node.test) else node.orelse)
+        if isinstance(node, ast.Call) and isinstance(node.func, ast.Name) and not node.keywords:
+            fn = builtins.get(node.func.id)
+            if fn is None:
+                raise LanguageError('unknown computed function')
+            args = [visit(a) for a in node.args]
+            try:
+                return fn(*args)
+            except (ValueError, TypeError, OverflowError, ZeroDivisionError) as e:
+                raise LanguageError('invalid computed function arguments') from e
+        raise LanguageError('unsupported computed expression')
+
+    result = visit(tree.body)
+    if type(result) not in (str, int, float, bool) or len(str(result)) > 100000:
+        raise LanguageError('computed expression result too large')
+    return result
+
+
+
+def compile_functions(p: Program) -> None:
+    """Expand typed, hygienic function calls into the established prompt AST.
+
+    Compilation is pure: no Python execution, imports, filesystem, or side effects.
+    Each invocation has independent choice draws, as with existing templates.
+    """
+    functions = p.functions or {}
+    budget = [0]
+    constants = p.constants or {}
+
+    def compile_arg(value: str, kind: str, env: dict[str, tuple[Node, ...]], stack: tuple[str, ...]) -> tuple[Node, ...]:
+        if value.startswith('$'):
+            parsed = Reader(value).parse()
+            if len(parsed) != 1 or not isinstance(parsed[0], (Ref, Call)):
+                raise LanguageError('invalid function reference argument')
+            if kind != 'text':
+                raise LanguageError('reference arguments require type text')
+            return compile_nodes(parsed, env, stack, {})
+        item = read_value(value, kind)
+        return (Text(str(item) if not isinstance(item, bool) else str(item).lower()),)
+
+    def compile_nodes(
+        nodes: tuple[Node, ...], env: dict[str, tuple[Node, ...]],
+        stack: tuple[str, ...], values: dict[str, object],
+    ) -> tuple[Node, ...]:
+        result: list[Node] = []
+        for node in nodes:
+            budget[0] += 1
+            if budget[0] > 30000:
+                raise LanguageError('function expansion exceeds node budget')
+            if isinstance(node, Ref) and node.name in env:
+                result.extend(env[node.name])
+            elif isinstance(node, Ref) and node.name in constants:
+                value = constants[node.name]
+                result.append(Text(str(value).lower() if isinstance(value, bool) else str(value)))
+            elif isinstance(node, Computed):
+                value = evaluate(node.expression, constants | values)
+                result.append(Text(str(value).lower() if isinstance(value, bool) else str(value)))
+            elif isinstance(node, Call):
+                function = functions.get(node.name)
+                if function is None:
+                    raise LanguageError(f'unknown function: {node.name}')
+                if node.name in stack:
+                    raise LanguageError('recursive function')
+                if len(node.args) > len(function.params):
+                    raise LanguageError('too many function arguments')
+                local = {}
+                local_values: dict[str, object] = {}
+                for i, param in enumerate(function.params):
+                    arg = node.args[i] if i < len(node.args) else param.default
+                    if arg is None:
+                        raise LanguageError(f'missing function argument: {param.name}')
+                    local[param.name] = compile_arg(arg, param.kind, env, stack)
+                    if not arg.startswith('$'):
+                        local_values[param.name] = read_value(arg, param.kind)
+                result.extend(compile_nodes(function.body, local, stack + (node.name,), local_values))
+            elif isinstance(node, Choice):
+                branches = tuple(Branch(compile_nodes(b.children, env, stack, values), b.facts, b.weight)
+                                 for b in node.branches)
+                result.append(Choice(branches))
+            elif isinstance(node, Conditional):
+                result.append(Conditional(node.condition, compile_nodes(node.children, env, stack, values)))
+            else:
+                result.append(node)
+        return tuple(result)
+
+    p.body = compile_nodes(p.body, {}, (), {})
+    p.templates = {name: compile_nodes(nodes, {}, (), {}) for name, nodes in p.templates.items()}
 
 
 def traverse(

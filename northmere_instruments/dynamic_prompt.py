@@ -16,8 +16,8 @@ class PromptTemplateInput(io.String.Input):
         super().__init__(
             'template', multiline=True, default='',
             tooltip='Use {red | blue} for alternatives, @3 for a weight, and => for facts. '
-                    'Optional --- header: choose, let, require, prefer. '
-                    'Use $name for reusable text and ?fact{text} for conditions.',
+                    'Optional --- header: choose, let, const, fn, require, prefer. '
+                    'Use $name, $fn("text"), ${1 + 2}, and ?fact{text}.',
         )
         self.widget_type = 'NORTHMERE_INSTRUMENTS_PROMPT'
         self.socketless = True

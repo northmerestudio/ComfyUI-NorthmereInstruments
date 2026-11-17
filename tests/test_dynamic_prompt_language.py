@@ -42,3 +42,48 @@ def test_errors_are_not_silent():
     with pytest.raises(PromptLanguageError, match='Legacy v3'):expand_prompt('@pick{day: sun | night: moon}',seed=0)
     with pytest.raises(PromptLanguageError):expand_prompt('{a | b}',seed=-1)
     with pytest.raises(PromptLanguageError):expand_prompt('---\nrequire a -> !a\n---\n{a => A | a => B}',seed=1)
+
+
+def test_typed_functions_and_scoped_arguments():
+    source = ('---\nfn scene.pose(subject: text, count: int = 2) = '
+              '$subject ${count + 1} {left | right}\n---\n'
+              '$scene.pose("model", 3) / $scene.pose("actor")')
+    outcomes = enumerate_outcomes(parse(source))
+    assert {text for text, _, _ in outcomes} == {
+        f'model 4 {a} / actor 3 {b}' for a in ('left', 'right') for b in ('left', 'right')
+    }
+    for mode in ('exact', 'approximate'):
+        assert expand_prompt(source, 9, mode=mode).startswith('model 4 ')
+
+
+def test_constants_computed_expressions_and_namespaced_functions():
+    source = ('---\nconst length: int = 4\n'
+              'fn text.decorate(word: text, multiplier: int) = '
+              '${upper(word)} ${length * multiplier} ${"yes" if multiplier > 1 else "no"}\n'
+              '---\n$text.decorate("hello", 3)')
+    assert expand_prompt(source) == 'HELLO 12 yes'
+
+
+@pytest.mark.parametrize('source', [
+    '---\nfn f(n: int) = $n\n---\n$f("wrong")',
+    '---\nfn f(n: int) = $n\n---\n$f()',
+    '---\nfn f(n: text) = $n\n---\n$f("a", "b")',
+    '---\nfn f(n: text) = $f("again")\n---\n$f("hi")',
+    '---\nfn f(n: text, n: int) = hi\n---\n$f("hi", 1)',
+    '---\nfn f(n: int = "no") = $n\n---\n$f()',
+    '${__import__("os")}', '${(1).__class__}', '${2 ** 100000}',
+    '---\nconst x: bool = 1\n---\n$x',
+])
+def test_extended_language_rejects_invalid_or_unsafe_programs(source):
+    with pytest.raises(PromptLanguageError):
+        expand_prompt(source)
+
+
+def test_existing_prompt_attachment_is_still_valid():
+    source = ROOT / 'examples' / 'beauty_prompt.txt'
+    for mode in ('auto', 'approximate'):
+        text, trace = expand_prompt(source.read_text(), 123, mode=mode, with_trace=True)
+        assert 'photorealistic editorial beauty photograph' in text
+        assert '?' not in text
+        assert '$model' not in text
+        assert trace['facts']

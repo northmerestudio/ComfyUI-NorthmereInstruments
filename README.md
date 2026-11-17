@@ -13,6 +13,9 @@ Expands seeded choices into a `STRING`. Supported syntax:
 - **Shared decisions:** `choose outfit = {casual | formal}` selects once for the entire generation; refer to `?outfit.casual{...}` or `?outfit.formal{...}`.
 - **Constraints:** `require day -> !flash` disallows conflicting choices; `prefer window & soft * 4` increases relative likelihood. Declare these in the header.
 - **Comments:** Whole body lines starting with `//` and whole header lines starting with `#` are ignored. Inline comments are not recognized.
+- **Constants:** `const count: int = 3` defines an immutable typed value. Types are `text`, `int`, `float`, and `bool`.
+- **Functions:** `fn scene.subject(name: text, tone: text = "natural") = $name with $tone lighting` defines a reusable function; call it with `$scene.subject("a model")`. Functions can call other functions.
+- **Expressions:** `${count * 2}` evaluates arithmetic, comparisons, Boolean logic, and built-in text functions.
 
 Example:
 

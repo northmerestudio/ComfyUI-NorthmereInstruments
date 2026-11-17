@@ -8,7 +8,7 @@ stylesheet.href = new URL('./prompt.css', import.meta.url).href;
 document.head.append(stylesheet);
 
 const IDENT = /^[A-Za-z][A-Za-z0-9_]*(?:\.[A-Za-z][A-Za-z0-9_]*)*/;
-const KEYWORD = /^(choose|let|require|prefer)\b/;
+const KEYWORD = /^(choose|let|const|fn|require|prefer)\b/;
 const WEIGHT = /^@(?:\d+(?:\.\d+)?)/;
 
 // Highlighting is deliberately forgiving. The Python parser is authoritative.
@@ -44,6 +44,7 @@ export function tokens(source) {
     if (rest.startsWith('=>') || rest.startsWith('->')) {
       emit('operator', rest.slice(0, 2)); i += 2; continue;
     }
+    if (rest.startsWith('${')) { emit('directive', '${'); i += 2; continue; }
     if (rest[0] === '$' || rest[0] === '?') {
       const name = rest.slice(1).match(IDENT);
       if (name && (rest[0] === '$' || rest[1 + name[0].length] === '{')) {

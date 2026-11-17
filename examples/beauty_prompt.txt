@@ -1,0 +1,42 @@
+---
+choose look = {natural | glossy | editorial | avantgarde}
+choose lighting = {softbox | window | dramatic | beauty_dish}
+choose framing = {fullbody | threequarter | waistup | headshot | closeup | macro}
+choose mood = {minimal | luxury | cinematic}
+
+let model = {a striking woman in her mid twenties | an elegant woman in her early thirties | a captivating mature female model | a high-fashion female beauty model}
+let skin = {warm olive skin | rich deep brown skin | luminous fair skin | golden tan skin | natural medium brown skin}
+let background = {warm ivory @3 | muted taupe @2 | soft blush pink @2 | charcoal grey | deep burgundy | pale sage green}
+let camera = {Hasselblad X2D medium-format photography | Phase One IQ4 medium-format photography | Canon EOS R5 professional photography | Sony A7R V professional photography}
+---
+
+A photorealistic editorial beauty photograph of $model with $skin, created for a contemporary luxury cosmetics campaign.
+
+She has a relaxed, confident expression, expressive eyes, and natural facial features. Her skin looks believable, with fine pores and subtle individual details rather than an artificially smooth finish.
+
+?look.natural{Her makeup is fresh and understated, with sheer foundation, soft peach blush, naturally shaped eyebrows, and moisturized nude lips.}
+?look.glossy{Her makeup features dewy skin, reflective highlights on the cheekbones, subtle champagne shimmer on the eyelids, and glossy lips.}
+?look.editorial{Her makeup is bold and precise, with sculpted blush, graphic eyeliner, carefully blended eyeshadow, and a defined lip color.}
+?look.avantgarde{Her makeup is expressive and artistic, with carefully placed metallic pigment, geometric eyeliner, and a restrained accent of unexpected color.}
+
+?framing.fullbody{Create a full-length fashion-beauty portrait showing her entire figure from head to toe, including both feet, with comfortable space around her silhouette. She stands in a relaxed editorial pose wearing a refined, minimalist outfit that complements her makeup. Keep the entire figure clearly readable.}
+?framing.threequarter{Create a three-quarter-length portrait framed from the head to just below the knees. She poses naturally with relaxed arms and elegant posture, wearing a sophisticated, understated outfit that complements her makeup.}
+?framing.waistup{Create a waist-up beauty portrait showing her head, torso, arms, and hands in a relaxed, natural pose. Her outfit has simple, refined lines that leave her face and makeup as the visual focus.}
+?framing.headshot{Compose a head-and-shoulders beauty portrait at eye level, showing her face, neck, and natural shoulder line with a little negative space.}
+?framing.closeup{Frame her face in a tight close-up at eye level, with both eyes clearly visible and her face filling most of the image.}
+?framing.macro{Create an intimate macro beauty detail shot with a carefully cropped view of her eyes, cheekbones, and lips, emphasizing makeup finish and realistic skin texture.}
+
+?lighting.softbox{Use a large diffused studio softbox for soft, flattering illumination, gentle shadows, and smooth highlight transitions.}
+?lighting.window{Use directional daylight from a nearby studio window, with natural shadow falloff and gentle highlights.}
+?lighting.dramatic{Use controlled side lighting to shape the subject, retaining rich shadows and enough detail across visible skin and clothing.}
+?lighting.beauty_dish{Use a beauty dish with soft fill, creating crisp catchlights, defined highlights, and controlled studio contrast.}
+
+?mood.minimal{The art direction is minimalist and modern, with restrained colors, simple styling, and an uncluttered composition.}
+?mood.luxury{The art direction feels luxurious and polished, with deliberate posing, refined color harmony, and premium beauty-advertising styling.}
+?mood.cinematic{The art direction is atmospheric and cinematic, with nuanced color grading, subtle tonal depth, and an intimate editorial mood.}
+
+A seamless $background studio backdrop keeps attention on the subject.
+
+Photographed in the style of $camera, with realistic perspective, natural color rendition, intentional depth of field, and crisp detail at the main point of focus.
+
+Professional editorial retouching preserves real skin texture and natural anatomy. A believable photograph with careful composition, natural hands and proportions where visible, and no text or logos.
