@@ -58,7 +58,12 @@ export function tokens(source) {
       if (type) { emit('type', type[0]); i += type[0].length; continue; }
     }
     {
-      const string = rest.match(/^(?:"(?:[^"\\]|\\.)*"|'(?:[^'\\]|\\.)*')/);
+      // Quoted strings are code only in declarations, expressions, or call arguments.
+      // Apostrophes in prompt prose (e.g. "sculptor's") must stay plain text.
+      const codeString = expressionDepth > 0 || (header && headerDepth === 0 &&
+        /^[ \t]*(?:const|fn)\b[^\r\n]*=/.test(linePrefix)) ||
+        /\$[A-Za-z][\w.]*(?:[ \t]*\([^\r\n)]*)$/.test(linePrefix);
+      const string = codeString && rest.match(/^(?:"(?:[^"\\\r\n]|\\.)*"|'(?:[^'\\\r\n]|\\.)*')/);
       if (string) { emit('string', string[0]); i += string[0].length; continue; }
       const number = (header || expressionDepth) && rest.match(NUMBER);
       if (number) { emit('number', number[0]); i += number[0].length; continue; }

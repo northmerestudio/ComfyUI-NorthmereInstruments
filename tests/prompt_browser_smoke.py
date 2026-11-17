@@ -72,6 +72,23 @@ $camera.faces(2) $subject ?scene.day{outside} @3
                 color = page.locator(f'.nmi-prompt-{kind}').first.evaluate('(e) => getComputedStyle(e).color')
                 base = page.locator('.nmi-prompt').evaluate('(e) => getComputedStyle(e).color')
                 assert color != base, (theme, kind)
+            # Apostrophes in literal prompt prose cannot start strings or spill across lines.
+            prose = """{
+  _ => in a sculptor's workshop
+  | _ => in a man's dressing room
+  | _ => in an old library
+}
+"""
+            prose_kinds = page.evaluate('(source) => tokens(source).map(t => [t.kind, t.value])', prose)
+            assert ''.join(value for _, value in prose_kinds) == prose
+            assert not any(kind == 'string' for kind, _ in prose_kinds), prose_kinds
+            # Genuine single and double quoted expression literals remain highlighted.
+            expressions = """const label: text = 'subject'
+fn label.wrap(value: text) = ${upper('hello') if value == "test" else 'world'}
+$label.wrap('test')
+"""
+            expr_kinds = page.evaluate('(source) => tokens(source).filter(t => t.kind === "string").map(t => t.value)', expressions)
+            assert expr_kinds == ["'subject'", "'hello'", '"test"', "'world'", "'test'"], expr_kinds
             page.evaluate('(v) => node.widget.setValue(v)', PROMPT)
             assert page.locator('.nmi-prompt').count() == 1
             assert page.evaluate('getComputedStyle(document.querySelector(".nmi-prompt-directive")).color') != page.evaluate('getComputedStyle(document.querySelector(".nmi-prompt")).color')
