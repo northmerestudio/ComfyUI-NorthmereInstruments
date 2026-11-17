@@ -72,6 +72,32 @@ $camera.faces(2) $subject ?scene.day{outside} @3
                 color = page.locator(f'.nmi-prompt-{kind}').first.evaluate('(e) => getComputedStyle(e).color')
                 base = page.locator('.nmi-prompt').evaluate('(e) => getComputedStyle(e).color')
                 assert color != base, (theme, kind)
+            # Highlight language constructs throughout the file, not only before prose.
+            full_example = """const subject_token: text = "sks"
+fn camera.hidden_faces(count: int = 1) = ${"hidden" if count == 1 else "visible"}
+choose attire = {
+  nude
+  | dressed
+}
+# Reclining poses
+let pose.reclined = {
+  _ => lying on her back
+  | arms_busy => leaning back on her forearms
+}
+require needs_space -> !compact_space
+prefer env_studio & light_directional * 2
+// Subject and appearance
+Natural photograph of $subject_token, ?attire.nude{nude}.
+{env_window => near the window | _ => in a sculptor's workshop}
+"""
+            full_tokens = page.evaluate('(source) => tokens(source).map(t => [t.kind, t.value])', full_example)
+            assert ''.join(value for _, value in full_tokens) == full_example
+            assert len([1 for kind, value in full_tokens if kind == 'directive' and value in ('choose', 'let', 'require', 'prefer')]) == 4
+            assert [value for kind, value in full_tokens if kind == 'comment'] == ['# Reclining poses', '// Subject and appearance']
+            assert len([1 for kind, value in full_tokens if kind == 'label' and 'env_studio' in value]) == 1
+            assert len([1 for kind, value in full_tokens if kind == 'separator']) >= 3
+            assert not any(kind == 'string' and 'sculptor' in value for kind, value in full_tokens)
+            assert any(kind == 'variable' and value == 'count' for kind, value in full_tokens)
             # Apostrophes in literal prompt prose cannot start strings or spill across lines.
             prose = """{
   _ => in a sculptor's workshop

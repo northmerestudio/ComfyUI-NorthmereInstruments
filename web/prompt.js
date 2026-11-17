@@ -20,8 +20,6 @@ const EXPRESSION_KEYWORD = /^(?:if|else|and|or|not)\b/;
 export function tokens(source) {
   const out = [];
   let i = 0;
-  let header = true;
-  let headerDepth = 0;
   let expressionDepth = 0;
   const emit = (kind, value) => {
     if (out.length && out[out.length - 1].kind === kind) out[out.length - 1].value += value;
@@ -30,44 +28,41 @@ export function tokens(source) {
   while (i < source.length) {
     const startLine = i === 0 || source[i - 1] === '\n';
     const rest = source.slice(i);
-    if (startLine && header && headerDepth === 0 && !/^[ \t]*(?:#|$|\r?$)/.test(rest) &&
-        !/^[ \t]*(?:choose|let|const|fn|require|prefer)\b/.test(rest) &&
-        !/^[ \t]*[|}]/.test(rest)) header = false;
     if (startLine) {
-      const comment = rest.match(header ? /^[ \t]*#[^\r\n]*/ : /^[ \t]*\/\/[^\r\n]*/);
+      const comment = rest.match(/^[ \t]*(?:#|\/\/)[^\r\n]*/);
       if (comment) { emit('comment', comment[0]); i += comment[0].length; continue; }
     }
     if (rest[0] === '\\' && rest.length > 1) {
       emit('escape', rest.slice(0, 2)); i += 2; continue;
     }
-    if (header && (startLine || /^[ \t]/.test(source[i - 1] ?? ''))) {
+    if (startLine || /^[ \t]/.test(source[i - 1] ?? '')) {
       const keyword = rest.match(KEYWORD);
       if (keyword) { emit('directive', keyword[0]); i += keyword[0].length; continue; }
     }
     const linePrefix = source.slice(source.lastIndexOf('\n', i - 1) + 1, i);
-    if (header && /^(?:[ \t]*)(?:choose|let|const|fn)[ \t]+$/.test(linePrefix)) {
+    if (/^(?:[ \t]*)(?:choose|let|const|fn)[ \t]+$/.test(linePrefix)) {
       const name = rest.match(IDENT);
       if (name) { emit(linePrefix.trim() === 'fn' ? 'function' : 'variable', name[0]); i += name[0].length; continue; }
     }
-    if (header && /^[ \t]*fn[ \t]+[A-Za-z][\w.]*[ \t]*\([^\n]*[,(][ \t]*$/.test(linePrefix)) {
+    if (/^[ \t]*fn[ \t]+[A-Za-z][\w.]*[ \t]*\([^\n]*[,(][ \t]*$/.test(linePrefix)) {
       const argument = rest.match(/^[A-Za-z][A-Za-z0-9_]*(?=[ \t]*:)/);
       if (argument) { emit('variable', argument[0]); i += argument[0].length; continue; }
     }
-    if (header && /:[ \t]*$/.test(linePrefix)) {
+    if (/:[ \t]*$/.test(linePrefix)) {
       const type = rest.match(TYPE);
       if (type) { emit('type', type[0]); i += type[0].length; continue; }
     }
     {
       // Quoted strings are code only in declarations, expressions, or call arguments.
       // Apostrophes in prompt prose (e.g. "sculptor's") must stay plain text.
-      const codeString = expressionDepth > 0 || (header && headerDepth === 0 &&
+      const codeString = expressionDepth > 0 || (
         /^[ \t]*(?:const|fn)\b[^\r\n]*=/.test(linePrefix)) ||
         /\$[A-Za-z][\w.]*(?:[ \t]*\([^\r\n)]*)$/.test(linePrefix);
       const string = codeString && rest.match(/^(?:"(?:[^"\\\r\n]|\\.)*"|'(?:[^'\\\r\n]|\\.)*')/);
       if (string) { emit('string', string[0]); i += string[0].length; continue; }
-      const number = (header || expressionDepth) && rest.match(NUMBER);
+      const number = (expressionDepth || /^[ \t]*(?:const|fn|require|prefer)\b/.test(linePrefix)) && rest.match(NUMBER);
       if (number) { emit('number', number[0]); i += number[0].length; continue; }
-      if ((header || expressionDepth) && /^(?:true|false|True|False)\b/.test(rest)) {
+      if ((expressionDepth || /^[ \t]*(?:const|fn)\b/.test(linePrefix)) && /^(?:true|false|True|False)\b/.test(rest)) {
         const value = rest.match(/^(?:true|false|True|False)\b/)[0];
         emit('boolean', value); i += value.length; continue;
       }
@@ -96,12 +91,21 @@ export function tokens(source) {
     if (weight && i > 0 && /\s/.test(source[i - 1])) {
       emit('weight', weight[0]); i += weight[0].length; continue;
     }
-    if (rest[0] === '=') { emit('operator', '='); i++; continue; }
-    if ('{}|&!():,+-*/'.includes(rest[0])) {
-      if (header && rest[0] === '{') headerDepth++;
-      if (header && rest[0] === '}') headerDepth = Math.max(0, headerDepth - 1);
+    if (expressionDepth) {
+      const name = rest.match(IDENT);
+      if (name) { emit('variable', name[0]); i += name[0].length; continue; }
+    }
+    if ('=&!<>*'.includes(rest[0])) { emit('operator', rest[0]); i++; continue; }
+    if (rest[0] === '|') { emit('separator', '|'); i++; continue; }
+    if ('{}():,+-/'.includes(rest[0])) {
       if (rest[0] === '}' && expressionDepth) expressionDepth--;
       emit('delimiter', rest[0]); i++; continue;
+    }
+    if (/^[ \t]*(?:require|prefer)\b/.test(linePrefix)) {
+      const fact = rest.match(/^[A-Za-z][A-Za-z0-9_.]*(?=\b)/);
+      if (fact && !/^(?:true|false)$/.test(fact[0])) {
+        emit('label', fact[0]); i += fact[0].length; continue;
+      }
     }
     const tag = rest.match(/^([A-Za-z][A-Za-z0-9_]*(?:\s*,\s*[A-Za-z][A-Za-z0-9_]*)*|_)(?=\s*=>)/);
     if (tag) { emit('label', tag[0]); i += tag[0].length; continue; }
