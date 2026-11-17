@@ -1,40 +1,305 @@
-choose look = {natural | glossy | editorial | avantgarde}
-choose lighting = {softbox | window | dramatic | beauty_dish}
-choose framing = {fullbody | threequarter | waistup | headshot | closeup | macro}
-choose mood = {minimal | luxury | cinematic}
+# Shared art direction. Each choose is resolved once per generated prompt.
+choose direction = {skincare @4 | modern_luxury @4 | chromatic @3 | couture @3 | botanical @3 | cinematic @3 | analog @2 | backstage @2 | coastal @2 | nocturne @2 | sculptural @2 | intimate @2}
+choose framing = {macro @1 | face @4 | head_shoulders @5 | bust @4 | waist_up @4 | three_quarter @2 | full_length @2}
+choose makeup = {bare @4 | dewy @4 | satin @4 | red_lip @2 | graphic_eye @2 | smoky @2 | monochrome @2 | sculpted_blush @2 | pearlescent @2 | metallic @1 | color_wash @2 | editorial_gloss @2 | fine_art @1}
+choose hair = {natural_curls | cropped_coils | afro | long_waves | tailored_bob | pixie | sleek_bun | braids | ponytail | finger_waves | short_shag | silver_crop | wet_look}
+choose setting = {neutral_studio @5 | color_studio @3 | dark_studio @2 | daylit_loft @3 | dressing_room @2 | conservatory @2 | gallery @2 | hotel @2 | backstage @1 | rooftop @1 | coast @1 | vintage_interior @1}
+choose light = {softbox @4 | beauty_dish @3 | clamshell @2 | window @4 | open_shade @3 | sidelight @3 | flash @2 | practical @2 | golden_hour @2 | rimlight @2}
+choose wardrobe = {simple_top @3 | fine_knit @2 | blouse @2 | tailored_blazer @2 | silk_dress @2 | linen @2 | structured_couture @2 | studio_wrap @2 | minimalist_black @2 | evening_satin @2}
+choose action = {still @4 | head_turn @3 | gaze_away @2 | half_smile @2 | hands_near_face @2 | adjusting_hair @2 | touch_collar @2 | walking @1 | seated @2 | looking_up @2}
+choose viewpoint = {eye_level @5 | slight_high @2 | three_quarter @3 | slight_low @1 | near_profile @2}
+choose finish = {clean_digital @5 | medium_format @3 | color_negative @3 | magazine_grain @2 | warm_film @2 | cool_editorial @2 | monochrome @2 | direct_flash @1}
+choose age = {twenties | early_thirties | late_thirties | forties | fifties | sixties}
+choose eye_contact = {direct | off_camera | downward | sideward}
 
-let model = {a striking woman in her mid twenties | an elegant woman in her early thirties | a captivating mature female model | a high-fashion female beauty model}
-let skin = {warm olive skin | rich deep brown skin | luminous fair skin | golden tan skin | natural medium brown skin}
-let background = {warm ivory @3 | muted taupe @2 | soft blush pink @2 | charcoal grey | deep burgundy | pale sage green}
-let camera = {Hasselblad X2D medium-format photography | Phase One IQ4 medium-format photography | Canon EOS R5 professional photography | Sony A7R V professional photography}
+# Reusable independently sampled modifiers; they don't have to match across references.
+let complexion = {very fair skin with a rosy undertone | fair skin with visible freckles | light olive skin | warm golden-brown skin | medium brown skin with a neutral undertone | deep brown skin with a warm undertone | very deep brown skin with a cool undertone | copper-brown skin | tan skin with an olive undertone | light brown skin with a golden undertone}
+let facial_character = {strong, expressive brows and a direct gaze | softly rounded features with natural asymmetry | defined cheekbones and a gentle jawline | an oval face with expressive eyes | a broad, warm smile and distinctive features | a striking profile and a softly defined mouth | subtle smile lines and an assured expression | distinctive features and an unforced presence}
+let hair_color = {deep espresso | natural black | dark chocolate brown | warm chestnut | copper auburn | dark blonde | rich mahogany | silver grey | salt-and-pepper | soft honey brown}
+let accessories = {no jewelry | small brushed-gold hoops | a single sculptural earring | tiny silver studs | delicate pearl earrings | a discreet silver ear cuff | a fine chain necklace | one minimal ring}
+let color_story = {warm cream and cinnamon | porcelain and muted rose | oxblood and cocoa | sage and muted gold | slate and soft silver | tobacco and ivory | deep plum and aubergine | terracotta and peach | sea-glass green and sand | charcoal and alabaster}
+let expression = {calm and inquisitive | quietly confident | subtly amused | reflective and unguarded | composed but approachable | alert and self-possessed | serene without looking vacant | warm and natural}
+let skin_detail = {a few tiny freckles and natural tonal variation | visible pores and delicate peach fuzz | fine smile lines and subtle skin texture | soft under-eye detail and natural asymmetry | realistic skin texture with gentle shine at the high points}
 
-A photorealistic editorial beauty photograph of $model with $skin, created for a contemporary luxury cosmetics campaign.
+# Compatibility: constraints eliminate implausible combinations.
+require framing.macro -> !action.walking
+require framing.macro -> !action.seated
+require framing.macro -> !action.adjusting_hair
+require framing.macro -> !action.touch_collar
+require framing.macro -> !wardrobe.structured_couture
+require framing.face -> !action.walking
+require framing.face -> !action.seated
+require framing.face -> !action.touch_collar
+require framing.head_shoulders -> !action.walking
+require framing.head_shoulders -> !action.seated
+require framing.full_length -> !setting.dark_studio
+require framing.full_length -> !setting.backstage
+require framing.full_length -> !framing.macro
+require action.walking -> !setting.neutral_studio
+require action.walking -> !setting.dark_studio
+require action.walking -> !setting.color_studio
+require action.walking -> !setting.dressing_room
+require action.walking -> !setting.backstage
+require action.seated -> !setting.coast
+require action.seated -> !setting.rooftop
+require light.window -> !setting.coast
+require light.window -> !setting.dark_studio
+require light.window -> !setting.neutral_studio
+require light.window -> !setting.color_studio
+require light.open_shade -> !setting.dark_studio
+require light.open_shade -> !setting.dressing_room
+require light.open_shade -> !setting.neutral_studio
+require light.open_shade -> !setting.color_studio
+require light.golden_hour -> !setting.neutral_studio
+require light.golden_hour -> !setting.color_studio
+require light.golden_hour -> !setting.dark_studio
+require light.golden_hour -> !setting.backstage
+require light.practical -> !setting.coast
+require light.practical -> !setting.rooftop
+require light.practical -> !setting.conservatory
+require light.practical -> !setting.neutral_studio
+require light.practical -> !setting.color_studio
+require light.flash -> !direction.skincare
+require direction.skincare -> !makeup.fine_art
+require direction.skincare -> !makeup.smoky
+require direction.skincare -> !makeup.graphic_eye
+require direction.skincare -> !makeup.metallic
+require direction.skincare -> !makeup.red_lip
+require direction.nocturne -> !setting.coast
+require direction.nocturne -> !setting.rooftop
+require direction.nocturne -> !light.open_shade
+require direction.nocturne -> !light.golden_hour
+require direction.coastal -> !setting.dark_studio
+require direction.coastal -> !light.practical
+require direction.coastal -> !light.flash
+require direction.backstage -> !setting.coast
+require makeup.metallic -> !direction.skincare
+require makeup.fine_art -> !direction.skincare
+require finish.monochrome -> !direction.chromatic
+require finish.monochrome -> !makeup.color_wash
+require finish.monochrome -> !makeup.monochrome
+require viewpoint.near_profile -> !eye_contact.direct
+require framing.macro -> !viewpoint.slight_low
+require framing.macro -> !viewpoint.slight_high
+require framing.full_length -> !light.clamshell
+require framing.full_length -> !light.beauty_dish
+require framing.full_length -> !light.rimlight
 
-She has a relaxed, confident expression, expressive eyes, and natural facial features. Her skin looks believable, with fine pores and subtle individual details rather than an artificially smooth finish.
+# Preferences bias rather than force recognizable photographic families.
+prefer direction.skincare & makeup.bare * 7
+prefer direction.skincare & makeup.dewy * 7
+prefer direction.skincare & setting.daylit_loft * 4
+prefer direction.skincare & light.window * 5
+prefer direction.skincare & light.open_shade * 4
+prefer direction.modern_luxury & makeup.satin * 6
+prefer direction.modern_luxury & makeup.red_lip * 3
+prefer direction.modern_luxury & setting.neutral_studio * 4
+prefer direction.modern_luxury & light.beauty_dish * 4
+prefer direction.chromatic & makeup.color_wash * 6
+prefer direction.chromatic & makeup.graphic_eye * 5
+prefer direction.chromatic & setting.color_studio * 7
+prefer direction.couture & wardrobe.structured_couture * 8
+prefer direction.couture & makeup.graphic_eye * 4
+prefer direction.couture & light.sidelight * 4
+prefer direction.botanical & setting.conservatory * 8
+prefer direction.botanical & light.window * 4
+prefer direction.botanical & wardrobe.linen * 4
+prefer direction.cinematic & setting.hotel * 4
+prefer direction.cinematic & light.practical * 6
+prefer direction.cinematic & finish.magazine_grain * 4
+prefer direction.analog & finish.color_negative * 7
+prefer direction.analog & setting.vintage_interior * 6
+prefer direction.backstage & setting.backstage * 9
+prefer direction.backstage & light.flash * 6
+prefer direction.backstage & finish.direct_flash * 5
+prefer direction.coastal & setting.coast * 9
+prefer direction.coastal & light.open_shade * 6
+prefer direction.coastal & wardrobe.linen * 5
+prefer direction.nocturne & setting.dark_studio * 6
+prefer direction.nocturne & light.sidelight * 5
+prefer direction.nocturne & makeup.smoky * 6
+prefer direction.sculptural & makeup.fine_art * 7
+prefer direction.sculptural & setting.gallery * 6
+prefer direction.sculptural & light.sidelight * 5
+prefer direction.intimate & setting.dressing_room * 6
+prefer direction.intimate & light.window * 5
+prefer direction.intimate & action.gaze_away * 3
+prefer framing.macro & makeup.pearlescent * 4
+prefer framing.macro & makeup.editorial_gloss * 5
+prefer framing.face & light.beauty_dish * 3
+prefer framing.head_shoulders & light.clamshell * 3
+prefer framing.full_length & setting.rooftop * 3
+prefer framing.full_length & action.walking * 3
+prefer setting.daylit_loft & light.window * 6
+prefer setting.conservatory & light.window * 5
+prefer setting.coast & light.open_shade * 7
+prefer setting.rooftop & light.golden_hour * 5
+prefer setting.dark_studio & light.sidelight * 5
+prefer setting.hotel & light.practical * 4
+prefer setting.backstage & light.flash * 7
+prefer setting.neutral_studio & light.softbox * 6
+prefer setting.color_studio & light.beauty_dish * 4
+prefer makeup.bare & finish.clean_digital * 4
+prefer makeup.dewy & light.clamshell * 3
+prefer makeup.red_lip & finish.color_negative * 3
+prefer makeup.graphic_eye & framing.face * 3
+prefer wardrobe.structured_couture & framing.three_quarter * 4
+prefer wardrobe.structured_couture & framing.full_length * 4
 
-?look.natural{Her makeup is fresh and understated, with sheer foundation, soft peach blush, naturally shaped eyebrows, and moisturized nude lips.}
-?look.glossy{Her makeup features dewy skin, reflective highlights on the cheekbones, subtle champagne shimmer on the eyelids, and glossy lips.}
-?look.editorial{Her makeup is bold and precise, with sculpted blush, graphic eyeliner, carefully blended eyeshadow, and a defined lip color.}
-?look.avantgarde{Her makeup is expressive and artistic, with carefully placed metallic pigment, geometric eyeliner, and a restrained accent of unexpected color.}
+// Main photographic description: one resolved choice from every shared decision.
+A photorealistic editorial beauty photograph of an adult woman in her
+{
+  age.twenties => late twenties
+  | age.early_thirties => early thirties
+  | age.late_thirties => late thirties
+  | age.forties => forties
+  | age.fifties => fifties
+  | age.sixties => sixties
+}, with $complexion, $facial_character, and $skin_detail.
 
-?framing.fullbody{Create a full-length fashion-beauty portrait showing her entire figure from head to toe, including both feet, with comfortable space around her silhouette. She stands in a relaxed editorial pose wearing a refined, minimalist outfit that complements her makeup. Keep the entire figure clearly readable.}
-?framing.threequarter{Create a three-quarter-length portrait framed from the head to just below the knees. She poses naturally with relaxed arms and elegant posture, wearing a sophisticated, understated outfit that complements her makeup.}
-?framing.waistup{Create a waist-up beauty portrait showing her head, torso, arms, and hands in a relaxed, natural pose. Her outfit has simple, refined lines that leave her face and makeup as the visual focus.}
-?framing.headshot{Compose a head-and-shoulders beauty portrait at eye level, showing her face, neck, and natural shoulder line with a little negative space.}
-?framing.closeup{Frame her face in a tight close-up at eye level, with both eyes clearly visible and her face filling most of the image.}
-?framing.macro{Create an intimate macro beauty detail shot with a carefully cropped view of her eyes, cheekbones, and lips, emphasizing makeup finish and realistic skin texture.}
+// A concrete creative concept, never the bare name of a category.
+{
+  direction.skincare => The photograph belongs to an understated premium skincare campaign, emphasizing honest skin, freshness, and intimate observation
+  | direction.modern_luxury => The photograph is a polished modern luxury cosmetics campaign, precise and understated rather than ostentatious
+  | direction.chromatic => The photograph is a playful color-led beauty editorial, with bold but disciplined blocks of color and graphic clarity
+  | direction.couture => The photograph is a fashion-house beauty story, balancing meticulously styled clothing with an expressive, powerful face
+  | direction.botanical => The photograph is an organic beauty editorial, using living foliage, tactile materials, and quiet visual sophistication
+  | direction.cinematic => The photograph feels like a candid, beautifully lit still from a contemporary art-house film
+  | direction.analog => The photograph is an analog-inspired magazine portrait, tactile and imperfect in a deliberate, elegant way
+  | direction.backstage => The photograph is an unposed-looking backstage fashion-week portrait, with the immediacy of an observed moment
+  | direction.coastal => The photograph is a windswept coastal beauty story, natural and quietly luxurious
+  | direction.nocturne => The photograph is a dramatic evening beauty editorial with restrained glamour and sculptural darkness
+  | direction.sculptural => The photograph is an experimental fine-art beauty editorial built around shape, shadow, and beautifully controlled cosmetic detail
+  | direction.intimate => The photograph is a personal, close-observed beauty portrait in a refined lived-in interior
+}.
 
-?lighting.softbox{Use a large diffused studio softbox for soft, flattering illumination, gentle shadows, and smooth highlight transitions.}
-?lighting.window{Use directional daylight from a nearby studio window, with natural shadow falloff and gentle highlights.}
-?lighting.dramatic{Use controlled side lighting to shape the subject, retaining rich shadows and enough detail across visible skin and clothing.}
-?lighting.beauty_dish{Use a beauty dish with soft fill, creating crisp catchlights, defined highlights, and controlled studio contrast.}
+Her $hair_color hair is styled as
+{
+  hair.natural_curls => soft naturally formed curls with irregular strands and a few flyaways
+  | hair.cropped_coils => a close, dense natural-coil crop with authentic texture
+  | hair.afro => a rounded natural afro with individual coils catching the light
+  | hair.long_waves => long loose waves with natural movement and varied strands
+  | hair.tailored_bob => a sharp chin-length bob with a clean but not unnaturally perfect edge
+  | hair.pixie => a textured pixie cut with soft irregularity at the hairline
+  | hair.sleek_bun => a low sleek bun with a few fine hairs at the temples
+  | hair.braids => meticulously finished braids with believable partings and edges
+  | hair.ponytail => a loose high ponytail with movement through the lengths
+  | hair.finger_waves => polished sculpted finger waves with gentle specular highlights
+  | hair.short_shag => a tousled layered shag with airy texture
+  | hair.silver_crop => a softly shaped short crop with visible individual strands
+  | hair.wet_look => a carefully styled wet-look sweep with natural strand separation
+}. Her expression is $expression.
 
-?mood.minimal{The art direction is minimalist and modern, with restrained colors, simple styling, and an uncluttered composition.}
-?mood.luxury{The art direction feels luxurious and polished, with deliberate posing, refined color harmony, and premium beauty-advertising styling.}
-?mood.cinematic{The art direction is atmospheric and cinematic, with nuanced color grading, subtle tonal depth, and an intimate editorial mood.}
+Her makeup is
+{
+  makeup.bare => almost invisible: translucent complexion coverage, naturally brushed brows, a hint of cream blush, and balm-soft lips
+  | makeup.dewy => fresh and dewy: a luminous but textured complexion, softly defined eyes, cream highlight at the cheekbones, and hydrated lips
+  | makeup.satin => refined satin-finish beauty makeup: restrained contour, balanced brows, muted eyes, and a precise rose-nude lip
+  | makeup.red_lip => built around a meticulously applied crimson lip, balanced with understated eyes and delicate complexion work
+  | makeup.graphic_eye => defined by precise graphic eyeliner and beautifully clean negative space around the eyes, with a muted lip
+  | makeup.smoky => a softly diffused smoky eye in taupe and charcoal with controlled depth and a subtle nude lip
+  | makeup.monochrome => a tonal composition of one muted hue across eyelids, cheeks, and lips, with intentional variation in saturation
+  | makeup.sculpted_blush => dominated by beautifully blended blush that shapes the cheeks and temples, paired with softly stained lips
+  | makeup.pearlescent => a subtle pearlescent veil across the eyelids and cheekbones with carefully controlled reflected highlights
+  | makeup.metallic => a single precise metallic pigment accent around the eyes, with otherwise minimal skin and lip makeup
+  | makeup.color_wash => an editorial wash of rich color swept across the eyelids and temples with a clean, deliberate edge
+  | makeup.editorial_gloss => controlled clear gloss on the lips and the high points of the face, with distinct natural skin texture beneath
+  | makeup.fine_art => a bold but restrained geometric makeup statement, one unexpected shape or texture surrounded by clean natural skin
+}. The application is believable up close, including softly visible brushwork and natural skin beneath the cosmetic finish.
 
-A seamless $background studio backdrop keeps attention on the subject.
+// Pose and expression: matched to the space actually visible in the crop.
+She is
+{
+  action.still => standing or holding still with her shoulders relaxed and a composed, natural posture
+  | action.head_turn => gently turning her head toward the camera, with a little movement in the hair
+  | action.gaze_away => pausing with her head angled slightly away from the lens
+  | action.half_smile => holding a fleeting, unforced half-smile, subtle movement around her eyes
+  | action.hands_near_face => resting the fingertips of one hand lightly beside her cheek without covering the makeup
+  | action.adjusting_hair => lightly arranging a loose strand of hair with one hand, the other arm relaxed
+  | action.touch_collar => touching the edge of her collar or neckline with relaxed fingers
+  | action.walking => taking a natural, unhurried step through the setting, with realistic fabric movement
+  | action.seated => sitting comfortably with an upright but unforced posture and naturally supported arms
+  | action.looking_up => lifting her chin slightly into the light without straining the neck
+}. Her eyes are
+{
+  eye_contact.direct => directed toward the lens
+  | eye_contact.off_camera => directed just past the camera
+  | eye_contact.downward => lowered thoughtfully
+  | eye_contact.sideward => directed toward something outside the frame
+}.
 
-Photographed in the style of $camera, with realistic perspective, natural color rendition, intentional depth of field, and crisp detail at the main point of focus.
+Her wardrobe is
+{
+  wardrobe.simple_top => a minimal opaque scoop-neck top in a soft neutral shade
+  | wardrobe.fine_knit => a beautifully fitted fine-knit top with visible yarn texture and relaxed drape
+  | wardrobe.blouse => a crisp cotton or silk blouse with believable seams and small natural creases
+  | wardrobe.tailored_blazer => a sharply tailored blazer with a simple clean neckline and structured shoulder line
+  | wardrobe.silk_dress => a refined sleeveless silk dress with subtle sheen and natural folds
+  | wardrobe.linen => an understated linen shirt or dress, showing the woven texture and organic creases
+  | wardrobe.structured_couture => an architectural couture piece with one sculptural shoulder or precisely constructed sleeve
+  | wardrobe.studio_wrap => a neatly draped, opaque wrap garment with quiet spa-like simplicity
+  | wardrobe.minimalist_black => a minimal dark top with a beautifully considered neckline
+  | wardrobe.evening_satin => a softly structured satin evening garment with controlled reflective highlights
+}. Accessories: $accessories. The styling supports the face rather than competing with it.
 
-Professional editorial retouching preserves real skin texture and natural anatomy. A believable photograph with careful composition, natural hands and proportions where visible, and no text or logos.
+The setting is
+{
+  setting.neutral_studio => a warm ivory or muted taupe seamless photographic studio with soft background tonal variation
+  | setting.color_studio => a contemporary color-block studio with a {dusty rose | muted cobalt | terracotta | pale sage | rich plum} backdrop and simple geometry
+  | setting.dark_studio => a controlled charcoal or burgundy studio with deep shadow and very subtle background gradation
+  | setting.daylit_loft => an artist's loft with high windows, pale plaster, and a hint of lived-in architectural detail
+  | setting.dressing_room => an elegant dressing room with a large mirror, muted wood, and a few understated objects
+  | setting.conservatory => a glass conservatory with softly receding foliage, stone floors, and humid daylight
+  | setting.gallery => a quiet contemporary gallery with pale walls, restrained architectural lines, and negative space
+  | setting.hotel => an intimate boutique hotel suite with tall curtains, textured walls, and understated furnishings
+  | setting.backstage => a fashion-week preparation room with garment racks and blurred backstage activity far behind her
+  | setting.rooftop => a sheltered rooftop terrace with subdued urban architecture beyond the subject
+  | setting.coast => a quiet coastal terrace overlooking soft sea and pale stone with wind moving loose strands of hair
+  | setting.vintage_interior => a carefully preserved mid-century interior with warm wood, modest furnishings, and period color
+}. The art direction follows a palette of $color_story, with just enough environmental context to establish the place.
+
+// Framing and viewpoint are explicit: Krea receives one well-defined shot.
+{
+  framing.macro => Extreme close-up beauty-detail photograph: crop into one eye, the neighboring cheek, and a portion of the lips. Fine pigment, lashes, tiny hairs, and skin texture are the subject; clothing and the room are outside the frame
+  | framing.face => Tight face portrait showing the full face and a little hair, with both eyes naturally proportioned and the makeup clearly readable
+  | framing.head_shoulders => Head-and-shoulders portrait with the complete head, neck, and natural shoulder line visible, leaving a little breathing room around the hair
+  | framing.bust => Upper-bust portrait showing the face, neck, shoulders, and enough garment detail to establish the styling
+  | framing.waist_up => Waist-up editorial portrait with both arms and hands naturally included when they contribute to the pose
+  | framing.three_quarter => Three-quarter-length editorial photograph, from the top of the head to below the knees, with relaxed body proportions
+  | framing.full_length => Full-length fashion-beauty portrait with the entire body from head to toe, both feet visible and comfortable space around the silhouette
+}. The viewpoint is
+{
+  viewpoint.eye_level => approximately eye-level and direct, with unexaggerated perspective
+  | viewpoint.slight_high => just above the face, gently looking down while preserving facial proportions
+  | viewpoint.three_quarter => at a subtle three-quarter angle, using depth across the cheekbones and shoulders
+  | viewpoint.slight_low => slightly lower than eye-level to give the composition confident editorial presence
+  | viewpoint.near_profile => near-profile, emphasizing the natural outline of the nose, lips, and jaw
+}.
+
+Lighting:
+{
+  light.softbox => a large diffused softbox gives broad soft highlights and gentle shadows, with natural skin texture intact
+  | light.beauty_dish => a carefully positioned beauty dish produces refined eye catchlights, dimensional cheek highlights, and controlled midtone contrast
+  | light.clamshell => a soft clamshell setup gives delicate under-chin fill and even, luminous facial modelling
+  | light.window => natural directional window daylight falls across the face, with believable shadow-side detail and gradual falloff
+  | light.open_shade => open-shade daylight creates soft facial shadows and subdued environmental highlights
+  | light.sidelight => one directional side key sculpts the face and garment with crisp but readable shadows
+  | light.flash => direct editorial flash produces crisp catchlights, immediate detail, and believable close shadows
+  | light.practical => warm practical lamplight mixes with restrained cooler ambient fill, without losing the face in darkness
+  | light.golden_hour => low late-afternoon sun grazes the face and hair, with natural ambient fill and protected highlights
+  | light.rimlight => soft frontal illumination and a restrained hair-edge light separate the subject from the background
+}.
+
+The photographic finish is
+{
+  finish.clean_digital => modern high-end digital photography with honest skin color and restrained retouching
+  | finish.medium_format => medium-format-inspired tonal separation, fine detail, and beautifully controlled highlight rolloff
+  | finish.color_negative => subtle color-negative film texture, gentle contrast, and slight natural imperfections
+  | finish.magazine_grain => tactile fashion-magazine grain, modest contrast, and a little organic irregularity
+  | finish.warm_film => gently warm analogue-inspired color with softly compressed highlights
+  | finish.cool_editorial => restrained cool-neutral editorial color that still respects the true skin undertone
+  | finish.monochrome => nuanced black-and-white photography with luminous midtones and beautifully described texture
+  | finish.direct_flash => a vivid 1990s editorial flash aesthetic with crisp detail and candid energy
+}.
+
+Photographic realism matters more than cosmetic perfection: visible pores, peach fuzz, fine expression lines where appropriate, naturally irregular hair, plausible fingers and joint positions, real fabric weight and seams, physically consistent catchlights and shadows. A single coherent image, not a collage or contact sheet. No text, logos, labels, watermarks, plastic skin, over-smoothing, or artificial facial symmetry.
