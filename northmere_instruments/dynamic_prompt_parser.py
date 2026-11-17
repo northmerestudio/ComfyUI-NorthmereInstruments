@@ -184,17 +184,23 @@ class Reader:
                 flush()
                 name = m.group()
                 self.pos += 1 + len(name)
-                if self.pos < len(self.data) and self.data[self.pos] == '(':
-                    args, self.pos = read_call(self.data, self.pos)
+                call_start = self.pos
+                while call_start < len(self.data) and self.data[call_start] in ' \t':
+                    call_start += 1
+                if call_start < len(self.data) and self.data[call_start] == '(':
+                    args, self.pos = read_call(self.data, call_start)
                     parts.append(Call(name, args))
                 else:
                     parts.append(Ref(name))
                 continue
             if c == '?':
                 m = re.match(PATH, self.data[self.pos + 1:])
-                if m and self.data[self.pos + 1 + len(m.group()):].startswith('{'):
+                if m and re.match(r'[ \t]*\{', self.data[self.pos + 1 + len(m.group()):]):
                     flush()
-                    self.pos += len(m.group()) + 2
+                    self.pos += len(m.group()) + 1
+                    while self.data[self.pos] in ' \t':
+                        self.pos += 1
+                    self.pos += 1
                     inner = self.parse('}')
                     if self.pos >= len(self.data) or self.data[self.pos] != '}':
                         raise LanguageError('unclosed conditional')
@@ -340,7 +346,7 @@ class Program:
     constants: dict[str, object] | None = None
 
 def parse(source: str) -> Program:
-    """Parse and validate an entire prompt, including its optional header."""
+    """Parse and validate an entire prompt, including its leading declarations."""
     templates: dict[str, tuple[Node, ...]] = {}
     decisions: dict[str, list[tuple[str, Fraction]]] = {}
     requirements: list[tuple[Expression, Expression]] = []
@@ -348,16 +354,31 @@ def parse(source: str) -> Program:
     functions: dict[str, Function] = {}
     constants: dict[str, object] = {}
     body = source
-    # Tolerate paste-related whitespace/BOM before a header, but do not
-    # change whitespace in ordinary prompts that have no header.
-    opening = re.match(r'\A\ufeff?[ \t\r\n]*---[ \t]*\r?\n', source)
-    if opening:
-        header_start = opening.end()
-        match = re.search(r'^---[ \t]*\r?$', source[header_start:], re.M)
-        if not match:
-            raise LanguageError('unclosed header')
-        header = source[header_start:header_start + match.start()]
-        body = source[header_start + match.end():]
+    # Declarations form the leading program section; the first ordinary
+    # content line starts the prompt body. No delimiter is required.
+    lines = source.splitlines(keepends=True)
+    offset = 0
+    started = False
+    depth = 0
+    for line in lines:
+        stripped = line.strip().lstrip('\ufeff').strip()
+        if not started and (not stripped or stripped.startswith('#')):
+            offset += len(line)
+            continue
+        if depth == 0 and stripped and not stripped.startswith('#') and not re.match(
+                r'(?:choose|let|const|fn|require|prefer)\s+', stripped):
+            break
+        started = True
+        if not stripped.startswith('#'):
+            depth += line.count('{') - line.count('}')
+            if depth < 0:
+                raise LanguageError('malformed declaration brace')
+        offset += len(line)
+    if started:
+        if depth:
+            raise LanguageError('unclosed declaration')
+        header = source[:offset].lstrip('\ufeff')
+        body = source[offset:]
         body = body.removeprefix('\r\n') if body.startswith('\r\n') else body.removeprefix('\n')
         statements = []
         cur = ''
@@ -368,12 +389,12 @@ def parse(source: str) -> Program:
             cur += ('\n' if cur else '') + line
             depth += line.count('{') - line.count('}')
             if depth < 0:
-                raise LanguageError('malformed header brace')
+                raise LanguageError('malformed declaration brace')
             if depth == 0:
                 statements.append(cur.strip())
                 cur = ''
         if cur or depth:
-            raise LanguageError('unclosed header statement')
+            raise LanguageError('unclosed declaration statement')
         for st in statements:
             m = re.fullmatch(f'const\\s+({PATH})\\s*:\\s*(text|int|float|bool)\\s*=\\s*(.+)', st, re.S)
             if m:

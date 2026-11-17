@@ -18,7 +18,7 @@ def test_exact_mass_and_tagged_conditions() -> None:
 
 
 def test_shared_decision_has_one_selection_in_both_modes() -> None:
-    source = '---\nchoose style = {simple @2 | ornate}\n---\n?style.simple{A}?style.ornate{B}/?style.simple{C}?style.ornate{D}'
+    source = 'choose style = {simple @2 | ornate}\n?style.simple{A}?style.ornate{B}/?style.simple{C}?style.ornate{D}'
     for mode in ('exact', 'approximate'):
         for seed in range(25):
             result, trace = expand_prompt(source, seed, mode=mode, with_trace=True)
@@ -27,7 +27,7 @@ def test_shared_decision_has_one_selection_in_both_modes() -> None:
 
 
 def test_fresh_template_draws_not_shared() -> None:
-    source = '---\nlet gaze = {left | right}\n---\n$gaze and $gaze'
+    source = 'let gaze = {left | right}\n$gaze and $gaze'
     outcomes = enumerate_outcomes(parse(source))
     assert {text for text, _, _ in outcomes} == {
         'left and left', 'left and right', 'right and left', 'right and right',
@@ -35,12 +35,12 @@ def test_fresh_template_draws_not_shared() -> None:
 
 
 def test_multiline_header_comments_are_not_rendered() -> None:
-    source = '---\n# Comment\nlet pose = {one |\n# Comment inside a declaration\ntwo}\n---\n$pose'
+    source = '# Comment\nlet pose = {one |\n# Comment inside a declaration\ntwo}\n$pose'
     assert {expand_prompt(source, seed) for seed in range(20)} == {'one', 'two'}
 
 
 def test_windows_line_endings_supported() -> None:
-    source = '---\r\nchoose style = {a | b}\r\n---\r\n?style.a{A}?style.b{B}'
+    source = 'choose style = {a | b}\r\n?style.a{A}?style.b{B}'
     assert {expand_prompt(source, seed) for seed in range(20)} == {'A', 'B'}
 
 
@@ -50,7 +50,7 @@ def test_whole_line_comments_are_discarded() -> None:
 
 
 def test_hard_rule_enforced_in_exact_and_approximate() -> None:
-    source = '---\nrequire window -> !flash\n---\n{window => W | room => R}{flash => F | soft => S}'
+    source = 'require window -> !flash\n{window => W | room => R}{flash => F | soft => S}'
     for mode in ('exact', 'approximate'):
         seen = {expand_prompt(source, seed, mode=mode) for seed in range(50)}
         assert 'WF' not in seen
@@ -58,7 +58,7 @@ def test_hard_rule_enforced_in_exact_and_approximate() -> None:
 
 
 def test_preference_changes_exact_probabilities() -> None:
-    source = '---\nprefer room & sun * 3\n---\n{room => R | open => O}{sun => S | gray => G}'
+    source = 'prefer room & sun * 3\n{room => R | open => O}{sun => S | gray => G}'
     mass = {text: chance for text, _, chance in enumerate_outcomes(parse(source))}
     assert mass == {'RS': Fraction(1, 2), 'RG': Fraction(1, 6),
                     'OS': Fraction(1, 6), 'OG': Fraction(1, 6)}
@@ -74,7 +74,7 @@ def test_large_independent_prompt_uses_bounded_search() -> None:
 
 
 def test_unsatisfiable_prompt_rejected_in_both_modes() -> None:
-    source = '---\nrequire a -> !a\n---\n{a => A | a => B}'
+    source = 'require a -> !a\n{a => A | a => B}'
     for mode in ('exact', 'approximate'):
         with pytest.raises(PromptLanguageError):
             expand_prompt(source, 2, mode=mode)
@@ -82,13 +82,13 @@ def test_unsatisfiable_prompt_rejected_in_both_modes() -> None:
 
 @pytest.mark.parametrize('source', [
     '{one}', '{one | two', '{a => one | two}',
-    '---\nlet x = $x\n---\n$x',
-    '---\nlet x = $missing\n---\n$x',
-    '---\nchoose x = {a | a}\n---\n?x.a{A}',
-    '---\nrequire missing -> !missing\n---\ntext',
-    '---\nlet x = {a | b}\nlet x = {c | d}\n---\n$x',
-    '---\nchoose x = {a | b}\n---\n?missing{no}',
-    '---\nchoose x = {a | b}\n---\n?x.a{{fact => yes | _ => no}}',
+    'let x = $x\n$x',
+    'let x = $missing\n$x',
+    'choose x = {a | a}\n?x.a{A}',
+    'require missing -> !missing\ntext',
+    'let x = {a | b}\nlet x = {c | d}\n$x',
+    'choose x = {a | b}\n?missing{no}',
+    'choose x = {a | b}\n?x.a{{fact => yes | _ => no}}',
     '{red @0 | blue}',
 ])
 def test_malformed_and_invalid_prompts_are_rejected(source: str) -> None:
@@ -117,12 +117,12 @@ def test_rendering_keeps_literal_whitespace() -> None:
 
 @pytest.mark.parametrize('prefix', ['', '\n', '\n\n', '   ', '\n  ', '\ufeff', '\ufeff\n  '])
 def test_header_accepts_paste_whitespace(prefix: str) -> None:
-    source = prefix + '---  \nchoose look = {natural | glossy}\nlet model = {woman | model}\n---\n$model'
+    source = prefix + 'choose look = {natural | glossy}\nlet model = {woman | model}\n$model'
     assert {expand_prompt(source, seed) for seed in range(20)} == {'woman', 'model'}
 
 
 def test_header_accepts_whitespace_with_windows_line_endings() -> None:
-    source = '\r\n  ---  \r\nchoose look = {natural | glossy}\r\n---\r\n?look.natural{N}?look.glossy{G}'
+    source = '\r\n  choose look = {natural | glossy}\r\n?look.natural{N}?look.glossy{G}'
     assert {expand_prompt(source, seed) for seed in range(20)} == {'N', 'G'}
 
 
@@ -130,6 +130,6 @@ def test_no_header_preserves_leading_whitespace() -> None:
     assert expand_prompt('\n  portrait', 0) == '\n  portrait'
 
 
-def test_unclosed_indented_header_still_rejected() -> None:
-    with pytest.raises(PromptLanguageError, match='unclosed header'):
-        expand_prompt('\n ---\nlet model = {woman | model}\n$model')
+def test_unclosed_indented_declaration_still_rejected() -> None:
+    with pytest.raises(PromptLanguageError, match='unclosed declaration'):
+        expand_prompt('\n  let model = {woman | model\n$model')

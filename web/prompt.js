@@ -16,7 +16,8 @@ const WEIGHT = /^@(?:\d+(?:\.\d+)?)/;
 export function tokens(source) {
   const out = [];
   let i = 0;
-  let header = source.startsWith('---\n');
+  let header = true;
+  let headerDepth = 0;
   const emit = (kind, value) => {
     if (out.length && out[out.length - 1].kind === kind) out[out.length - 1].value += value;
     else out.push({ kind, value });
@@ -24,12 +25,9 @@ export function tokens(source) {
   while (i < source.length) {
     const startLine = i === 0 || source[i - 1] === '\n';
     const rest = source.slice(i);
-    if (startLine && /^---(?:\r?\n|$)/.test(rest)) {
-      const marker = rest.startsWith('---\r\n') ? '---\r\n' : rest.startsWith('---\n') ? '---\n' : '---';
-      emit('directive', marker); i += marker.length;
-      if (i !== marker.length) header = false;
-      continue;
-    }
+    if (startLine && header && headerDepth === 0 && !/^[ \t]*(?:#|$|\r?$)/.test(rest) &&
+        !/^[ \t]*(?:choose|let|const|fn|require|prefer)\b/.test(rest) &&
+        !/^[ \t]*[|}]/.test(rest)) header = false;
     if (startLine) {
       const comment = rest.match(header ? /^[ \t]*#[^\r\n]*/ : /^[ \t]*\/\/[^\r\n]*/);
       if (comment) { emit('comment', comment[0]); i += comment[0].length; continue; }
@@ -56,6 +54,8 @@ export function tokens(source) {
       emit('weight', weight[0]); i += weight[0].length; continue;
     }
     if ('{}|&!()'.includes(rest[0])) {
+      if (header && rest[0] === '{') headerDepth++;
+      if (header && rest[0] === '}') headerDepth = Math.max(0, headerDepth - 1);
       emit('delimiter', rest[0]); i++; continue;
     }
     const tag = rest.match(/^([A-Za-z][A-Za-z0-9_]*(?:\s*,\s*[A-Za-z][A-Za-z0-9_]*)*|_)(?=\s*=>)/);

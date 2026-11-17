@@ -16,7 +16,7 @@ class PromptTemplateInput(io.String.Input):
         super().__init__(
             'template', multiline=True, default='',
             tooltip='Use {red | blue} for alternatives, @3 for a weight, and => for facts. '
-                    'Optional --- header: choose, let, const, fn, require, prefer. '
+                    'Declare choose, let, const, fn, require, prefer before prompt text. '
                     'Use $name, $fn("text"), ${1 + 2}, and ?fact{text}.',
         )
         self.widget_type = 'NORTHMERE_INSTRUMENTS_PROMPT'
@@ -31,7 +31,7 @@ class DynamicPromptNode(io.ComfyNode):
             display_name='Northmere Dynamic Prompt',
             category=CATEGORY,
             description='Expand seeded text choices with weights, shared decisions, reusable templates, '
-                        'conditional text and hard/soft constraints. Optional --- header defines rules.',
+                        'conditional text and hard/soft constraints. Leading declarations define rules.',
             search_aliases=['northmere prompt', 'dynamic prompt', 'random prompt', 'prompt template'],
             inputs=[
                 PromptTemplateInput(),

@@ -9,12 +9,10 @@ import shutil
 ROOT = Path(__file__).resolve().parents[1]
 JS = (ROOT/'web/prompt.js').read_text().replace("import { app } from '../../scripts/app.js';", '').replace('import.meta.url', "'file:///tmp/prompt.js'").replace('export function tokens', 'function tokens')
 CSS = (ROOT/'web/prompt.css').read_text()
-PROMPT = """---
-choose attire = {casual @3 | formal}
+PROMPT = """choose attire = {casual @3 | formal}
 let hero = {day => cinematic portrait | night => moonlit portrait}
 require day -> !flash
 prefer day & soft * 3
----
 // A comment about this prompt
 $hero ?attire.casual{shirt}?attire.formal{jacket}
 {soft => soft light | flash => flash} \\{literal\\}
