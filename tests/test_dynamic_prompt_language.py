@@ -121,3 +121,22 @@ def test_plain_prompt_whitespace_stays_literal():
     assert {expand_prompt(source, seed) for seed in range(20)} == {
         '  A  x  B\n', '  A  y  B\n',
     }
+
+
+def test_prompt_syntax_errors_report_source_position() -> None:
+    from northmere_instruments.dynamic_prompt_sampler import PromptLanguageError, expand_prompt
+
+    cases = [
+        ('first\n{red | blue', 'Line 2, column 1: unclosed choice'),
+        ('first\n\\z', 'Line 2, column 1: invalid escape'),
+        ('// comment\nfirst\n{red | blue', 'Line 3, column 1: unclosed choice'),
+        ('let color = {red | blue\nbody', 'Line 1, column 13: unclosed declaration'),
+        ('choose color = {red | }\nbody', 'Line 1, column 1: bad decision option'),
+    ]
+    for source, expected in cases:
+        try:
+            expand_prompt(source)
+        except PromptLanguageError as error:
+            assert expected in str(error), str(error)
+        else:
+            raise AssertionError(f'Expected syntax failure for {source!r}')

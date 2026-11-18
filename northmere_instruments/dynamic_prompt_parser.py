@@ -19,6 +19,10 @@ PATH = f'{ID}(?:\\.{ID})*'
 class LanguageError(ValueError):
     """Invalid prompt syntax, semantics, or exact sampling budget."""
 
+    def __init__(self, message: str, offset: int | None = None) -> None:
+        super().__init__(message)
+        self.offset = offset
+
 
 @dataclass(frozen=True)
 class Text:
@@ -141,9 +145,13 @@ def read_call(source: str, start: int) -> tuple[tuple[str, ...], int]:
 class Reader:
     """Read nested prompt expressions into immutable syntax nodes."""
 
-    def __init__(self, data: str) -> None:
+    def __init__(self, data: str, base: int = 0) -> None:
         self.data = data
         self.pos = 0
+        self.base = base
+
+    def fail(self, message: str, pos: int | None = None) -> None:
+        raise LanguageError(message, self.base + (self.pos if pos is None else pos))
 
     def parse(self, stop: str = '') -> tuple[Node, ...]:
         parts: list[Node] = []
@@ -157,10 +165,10 @@ class Reader:
             c = self.data[self.pos]
             if c == '\\':
                 if self.pos + 1 == len(self.data):
-                    raise LanguageError('trailing escape')
+                    self.fail('trailing escape')
                 nxt = self.data[self.pos + 1]
                 if nxt not in '{}|$?@/=\\':
-                    raise LanguageError('invalid escape')
+                    self.fail('invalid escape')
                 buf.append(nxt)
                 self.pos += 2
                 continue
@@ -173,14 +181,14 @@ class Reader:
                 if self.data.startswith('${', self.pos):
                     end = self.data.find('}', self.pos + 2)
                     if end < 0:
-                        raise LanguageError('unclosed computed expression')
+                        self.fail('unclosed computed expression')
                     flush()
                     parts.append(Computed(self.data[self.pos + 2:end].strip()))
                     self.pos = end + 1
                     continue
                 m = re.match(PATH, self.data[self.pos + 1:])
                 if not m:
-                    raise LanguageError('invalid template reference')
+                    self.fail('invalid template reference')
                 flush()
                 name = m.group()
                 self.pos += 1 + len(name)
@@ -203,12 +211,12 @@ class Reader:
                     self.pos += 1
                     inner = self.parse('}')
                     if self.pos >= len(self.data) or self.data[self.pos] != '}':
-                        raise LanguageError('unclosed conditional')
+                        self.fail('unclosed conditional', self.pos)
                     self.pos += 1
                     parts.append(Conditional(m.group(), inner))
                     continue
             if c == '}':
-                raise LanguageError('unexpected closing brace')
+                self.fail('unexpected closing brace')
             buf.append(c)
             self.pos += 1
         flush()
@@ -217,6 +225,7 @@ class Reader:
     def choice(self) -> Choice:
         # Scan nested choices and escapes before parsing each alternative.
         start = self.pos
+        opening = start - 1
         depth = 0
         escaped = False
         sections = []
@@ -234,32 +243,34 @@ class Reader:
                 depth += 1
             elif c == '}':
                 if depth == 0:
-                    sections.append(self.data[start:self.pos])
+                    sections.append((self.data[start:self.pos], start))
                     self.pos += 1
                     break
                 depth -= 1
             elif c == '|' and depth == 0:
-                sections.append(self.data[start:self.pos])
+                sections.append((self.data[start:self.pos], start))
                 start = self.pos + 1
             self.pos += 1
         else:
-            raise LanguageError('unclosed choice')
+            self.fail('unclosed choice', opening)
         if len(sections) < 2:
-            raise LanguageError('a choice needs at least two branches')
+            self.fail('a choice needs at least two branches')
         branches = []
         has_tag = []
-        for section in sections:
+        for section, section_start in sections:
             # Trim syntax-margin whitespace, not internal text whitespace.
+            leading = len(section) - len(section.lstrip())
+            section_start += leading
             section = section.strip()
             w = Fraction(1)
             if re.search('\\s+@-[0-9]+(?:\\.[0-9]+)?$', section):
-                raise LanguageError('negative weight')
+                self.fail('negative weight')
             wm = re.search('\\s+@([0-9]+(?:\\.[0-9]+)?)$', section)
             if wm:
                 w = Fraction(wm.group(1))
                 section = section[:wm.start()]
             if w <= 0:
-                raise LanguageError('weights must be positive')
+                self.fail('weights must be positive')
             # Fact tags are recognized only at the start of a branch.
             tag = re.match(f'^((?:{ID})(?:\\s*,\\s*{ID})*|_)\\s*=>\\s*', section)
             facts = frozenset()
@@ -270,13 +281,13 @@ class Reader:
                 has_tag.append(True)
             else:
                 has_tag.append(False)
-            child_reader = Reader(section)
+            child_reader = Reader(section, self.base + section_start + (tag.end() if tag else 0))
             nodes = child_reader.parse()
             if child_reader.pos < len(section):
-                raise LanguageError('unparsed content')
+                self.fail('unparsed content')
             branches.append(Branch(nodes, facts, w))
         if any(has_tag) and (not all(has_tag)):
-            raise LanguageError('mixed fact tags and plain branches')
+            self.fail('mixed fact tags and plain branches')
         return Choice(tuple(branches))
 
 def parse_expr(expr: str) -> Expression:
@@ -354,6 +365,7 @@ def parse(source: str) -> Program:
     functions: dict[str, Function] = {}
     constants: dict[str, object] = {}
     body = source
+    body_start = 0
     # Declarations form the leading program section; the first ordinary
     # content line starts the prompt body. No delimiter is required.
     lines = source.splitlines(keepends=True)
@@ -376,10 +388,13 @@ def parse(source: str) -> Program:
         offset += len(line)
     if started:
         if depth:
-            raise LanguageError('unclosed declaration')
+            raise LanguageError('unclosed declaration', source.rfind('{', 0, offset))
         header = source[:offset].lstrip('\ufeff')
+        body_start = offset
         body = source[offset:]
-        body = body.removeprefix('\r\n') if body.startswith('\r\n') else body.removeprefix('\n')
+        skipped = 2 if body.startswith('\r\n') else 1 if body.startswith('\n') else 0
+        body_start += skipped
+        body = body[skipped:]
         statements = []
         cur = ''
         depth = 0
@@ -395,71 +410,93 @@ def parse(source: str) -> Program:
                 cur = ''
         if cur or depth:
             raise LanguageError('unclosed declaration statement')
+        search_start = 0
         for st in statements:
-            m = re.fullmatch(f'const\\s+({PATH})\\s*:\\s*(text|int|float|bool)\\s*=\\s*(.+)', st, re.S)
-            if m:
-                name, kind, value = m.groups()
-                if name in templates or name in functions or name in decisions or name in constants:
-                    raise LanguageError('duplicate declaration')
-                constants[name] = read_value(value, kind)
-                continue
-            m = re.fullmatch(f'fn\\s+({PATH})\\s*\\((.*?)\\)\\s*=\\s*(.*)', st, re.S)
-            if m:
-                name, signature, definition = m.groups()
-                if name in templates or name in decisions or name in functions or name in constants or name.split('.')[0] in decisions:
-                    raise LanguageError('duplicate declaration')
-                params = []
-                for raw in split_args(signature):
-                    item = re.fullmatch(f'({ID})\\s*:\\s*(text|int|float|bool)(?:\\s*=\\s*(.+))?', raw, re.S)
-                    if not item:
-                        raise LanguageError('invalid function parameter')
-                    param, kind, default = item.groups()
-                    if param in (p.name for p in params):
-                        raise LanguageError('duplicate function parameter')
-                    if default is not None:
-                        read_value(default, kind)
-                    params.append(Parameter(param, kind, default))
-                functions[name] = Function(tuple(params), Reader(definition).parse())
-                continue
-            m = re.fullmatch(f'let\\s+({PATH})\\s*=\\s*(.*)', st, re.S)
-            if m:
-                name, definition = m.groups()
-                if name in templates or name in decisions or name in functions or name in constants or name.split('.')[0] in decisions:
-                    raise LanguageError('duplicate declaration')
-                templates[name] = Reader(definition).parse()
-                continue
-            m = re.fullmatch(f'choose\\s+({ID})\\s*=\\s*\\{{(.*)\\}}', st, re.S)
-            if m:
-                name, parts = m.groups()
-                if name in templates or name in decisions or name in functions or name in constants or any((k.split('.')[0] == name for k in templates)):
-                    raise LanguageError('duplicate declaration')
-                variants = []
-                for raw in parts.split('|'):
-                    choice = re.fullmatch(f'\\s*({ID})(?:\\s+@([0-9]+(?:\\.[0-9]+)?))?\\s*', raw)
-                    if not choice:
-                        raise LanguageError('bad decision option')
-                    weight = Fraction(choice.group(2) or '1')
-                    if weight <= 0:
-                        raise LanguageError('bad decision weight')
-                    variants.append((choice.group(1), weight))
-                if len(variants) < 2 or len(set((n for n, _ in variants))) != len(variants):
-                    raise LanguageError('invalid decision variants')
-                decisions[name] = variants
-                continue
-            m = re.fullmatch('require\\s+(.+?)\\s*->\\s*(.+)', st)
-            if m:
-                requirements.append((parse_expr(m.group(1)), parse_expr(m.group(2))))
-                continue
-            m = re.fullmatch('prefer\\s+(.+)\\s+\\*\\s+([0-9]+(?:\\.[0-9]+)?)', st)
-            if m:
-                factor = Fraction(m.group(2))
-                if factor <= 0:
-                    raise LanguageError('invalid preference weight')
-                preferences.append((parse_expr(m.group(1)), factor))
-                continue
-            raise LanguageError(f'unknown header statement: {st[:45]}')
-    body = ''.join((line for line in body.splitlines(keepends=True) if not line.lstrip().startswith('//')))
-    parsed = Reader(body).parse()
+            statement_start = header.find(st, search_start)
+            search_start = statement_start + len(st)
+            try:
+                m = re.fullmatch(f'const\\s+({PATH})\\s*:\\s*(text|int|float|bool)\\s*=\\s*(.+)', st, re.S)
+                if m:
+                    name, kind, value = m.groups()
+                    if name in templates or name in functions or name in decisions or name in constants:
+                        raise LanguageError('duplicate declaration')
+                    constants[name] = read_value(value, kind)
+                    continue
+                m = re.fullmatch(f'fn\\s+({PATH})\\s*\\((.*?)\\)\\s*=\\s*(.*)', st, re.S)
+                if m:
+                    name, signature, definition = m.groups()
+                    if name in templates or name in decisions or name in functions or name in constants or name.split('.')[0] in decisions:
+                        raise LanguageError('duplicate declaration')
+                    params = []
+                    for raw in split_args(signature):
+                        item = re.fullmatch(f'({ID})\\s*:\\s*(text|int|float|bool)(?:\\s*=\\s*(.+))?', raw, re.S)
+                        if not item:
+                            raise LanguageError('invalid function parameter')
+                        param, kind, default = item.groups()
+                        if param in (p.name for p in params):
+                            raise LanguageError('duplicate function parameter')
+                        if default is not None:
+                            read_value(default, kind)
+                        params.append(Parameter(param, kind, default))
+                    functions[name] = Function(tuple(params), Reader(definition, st.find(definition)).parse())
+                    continue
+                m = re.fullmatch(f'let\\s+({PATH})\\s*=\\s*(.*)', st, re.S)
+                if m:
+                    name, definition = m.groups()
+                    if name in templates or name in decisions or name in functions or name in constants or name.split('.')[0] in decisions:
+                        raise LanguageError('duplicate declaration')
+                    templates[name] = Reader(definition, st.find(definition)).parse()
+                    continue
+                m = re.fullmatch(f'choose\\s+({ID})\\s*=\\s*\\{{(.*)\\}}', st, re.S)
+                if m:
+                    name, parts = m.groups()
+                    if name in templates or name in decisions or name in functions or name in constants or any((k.split('.')[0] == name for k in templates)):
+                        raise LanguageError('duplicate declaration')
+                    variants = []
+                    for raw in parts.split('|'):
+                        choice = re.fullmatch(f'\\s*({ID})(?:\\s+@([0-9]+(?:\\.[0-9]+)?))?\\s*', raw)
+                        if not choice:
+                            raise LanguageError('bad decision option')
+                        weight = Fraction(choice.group(2) or '1')
+                        if weight <= 0:
+                            raise LanguageError('bad decision weight')
+                        variants.append((choice.group(1), weight))
+                    if len(variants) < 2 or len(set((n for n, _ in variants))) != len(variants):
+                        raise LanguageError('invalid decision variants')
+                    decisions[name] = variants
+                    continue
+                m = re.fullmatch('require\\s+(.+?)\\s*->\\s*(.+)', st)
+                if m:
+                    requirements.append((parse_expr(m.group(1)), parse_expr(m.group(2))))
+                    continue
+                m = re.fullmatch('prefer\\s+(.+)\\s+\\*\\s+([0-9]+(?:\\.[0-9]+)?)', st)
+                if m:
+                    factor = Fraction(m.group(2))
+                    if factor <= 0:
+                        raise LanguageError('invalid preference weight')
+                    preferences.append((parse_expr(m.group(1)), factor))
+                    continue
+                raise LanguageError(f'unknown header statement: {st[:45]}')
+            except LanguageError as e:
+                if e.offset is not None:
+                    raise LanguageError(str(e), statement_start + e.offset) from e
+                raise LanguageError(str(e), statement_start) from e
+    # Preserve existing comment semantics while mapping parser offsets back to source.
+    kept = []
+    positions = []
+    index = 0
+    for line in body.splitlines(keepends=True):
+        if not line.lstrip().startswith('//'):
+            kept.append(line)
+            positions.extend(range(body_start + index, body_start + index + len(line)))
+        index += len(line)
+    try:
+        parsed = Reader(''.join(kept)).parse()
+    except LanguageError as e:
+        if e.offset is not None:
+            position = positions[e.offset] if e.offset < len(positions) else body_start + len(body)
+            raise LanguageError(str(e), position) from e
+        raise
     p = Program(parsed, templates, decisions, requirements, preferences, functions, constants)
     compile_functions(p)
     validate(p)

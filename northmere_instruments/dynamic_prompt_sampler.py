@@ -192,6 +192,10 @@ def expand_prompt(
     try:
         p = language.parse(source)
     except language.LanguageError as e:
+        if e.offset is not None:
+            line = source.count('\n', 0, e.offset) + 1
+            column = e.offset - source.rfind('\n', 0, e.offset)
+            raise PromptLanguageError(f'Line {line}, column {column}: {e}') from e
         raise PromptLanguageError(str(e)) from e
     if mode != 'approximate':
         try:
